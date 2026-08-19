@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Exploration Field - Atelier</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        #webgl-container {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+        }
+        
+        .hud-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            color: #ffffff;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .location-info h1 {
+            font-size: 1.2rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #e0d0b0;
+        }
+        .location-info p {
+            font-size: 0.8rem;
+            opacity: 0.8;
+        }
+
+        .controls-guide {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.75rem;
+            line-height: 1.4;
+        }
+
+        /* Mobile Controls */
+        #touch-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            height: 150px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .joystick-zone {
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            position: relative;
+            pointer-events: auto;
+            touch-action: none;
+        }
+
+        .joystick-knob {
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            position: absolute;
+            top: 35px;
+            left: 35px;
+            transition: transform 0.05s ease-out;
+        }
+
+        .system-btn {
+            pointer-events: auto;
+            background: rgba(20, 20, 20, 0.7);
+            border: 1px solid #a08050;
+            color: #e0d0b0;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            margin-left: 8px;
+        }
+        .system-btn:active {
+            background: #a08050;
+            color: #fff;
+        }
+
+        #menu-modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(20, 24, 28, 0.95);
+            border: 2px solid #a08050;
+            padding: 25px;
+            border-radius: 8px;
+            width: 320px;
+            color: #fff;
+            display: none;
+            pointer-events: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+        }
+
+        #menu-modal h2 {
+            margin-bottom: 15px;
+            color: #e0d0b0;
+            text-align: center;
+            font-size: 1.2rem;
+            border-bottom: 1px solid rgba(160,128,80,0.3);
+            padding-bottom: 8px;
+        }
+
+        .modal-btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .modal-btn {
+            background: #2a3038;
+            border: 1px solid #4a5058;
+            color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: center;
+        }
+        .modal-btn:hover {
+            background: #a08050;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        /* Reticle */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 6px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        @media (max-width: 768px) {
+            .controls-guide {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="webgl-container"></div>
+    <div id="crosshair"></div>
+
+    <div id="ui-layer">
+        <div class="hud-header">
+            <div class="location-info">
+                <h1 id="lang-title">錬金術師の領域</h1>
+                <p id="lang-pos">POS: X: 0.0, Z: 0.0</p>
+            </div>
+            <div>
+                <button class="system-btn" id="btn-lang">JP / EN</button>
+                <button class="system-btn" id="btn-menu">MENU</button>
+            </div>
+        </div>
+
+        <div class="controls-guide" id="lang-guide">
+            [PC Controls]<br>
+            WASD / Arrow Keys : Move<br>
+            Mouse Click : Lock Pointer & Look<br>
+            Shift : Run
+        </div>
+
+        <div id="touch-controls">
+            <div class="joystick-zone" id="joystick">
+                <div class="joystick-knob" id="knob"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Menu Modal -->
+    <div id="menu-modal">
+        <h2 id="lang-menu-title">システムメニュー</h2>
+        <div class="modal-btn-group">
+            <button class="modal-btn" id="btn-save">セーブ (Save)</button>
+            <button class="modal-btn" id="btn-load">ロード (Load)</button>
+            <button class="modal-btn" id="btn-export">エクスポート (Export)</button>
+            <button class="modal-btn" id="btn-import-trigger">インポート (Import)</button>
+            <button class="modal-btn" id="btn-close" style="background: #5a2a2a;">閉じる (Close)</button>
+        </div>
+        <input type="file" id="file-input" accept=".json">
+    </div>
+
+    <!-- Three.js Import -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- Localization Texts ---
+        const TRANSLATIONS = {
+            jp: {
+                title: "錬金術師の領域",
+                guide: "[PC操作]<br>WASD / 矢印キー : 移動<br>クリック : 視点操作有効化<br>Shift : 走る",
+                menuTitle: "システムメニュー",
+                saveBtn: "セーブ (Save)",
+                loadBtn: "ロード (Load)",
+                exportBtn: "エクスポート (Export)",
+                importBtn: "インポート (Import)",
+                closeBtn: "閉じる (Close)",
+                saveSuccess: "位置情報をセーブしました。",
+                loadSuccess: "位置情報をロードしました。",
+                importSuccess: "セーブデータを読み込みました。",
+                invalidFile: "無効なファイル形式です。"
+            },
+            en: {
+                title: "Alchemist's Realm",
+                guide: "[PC Controls]<br>WASD / Keys : Move<br>Click : Look Around<br>Shift : Run",
+                menuTitle: "System Menu",
+                saveBtn: "Save",
+                loadBtn: "Load",
+                exportBtn: "Export Data",
+                importBtn: "Import Data",
+                closeBtn: "Close",
+                saveSuccess: "Position saved.",
+                loadSuccess: "Position loaded.",
+                importSuccess: "Data imported successfully.",
+                invalidFile: "Invalid file format."
+            }
+        };
+
+        let currentLang = 'jp';
+
+        // --- Core Variables ---
+        const PLAYER_HEIGHT = 1.8;
+        const FIELD_WIDTH = 2000;  // X (2km)
+        const FIELD_DEPTH = 1000;  // Z (1km)
+
+        let scene, camera, renderer;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, isRunning = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let prevTime = performance.now();
+
+        // Mobile Touch State
+        let touchLookX = 0, touchLookY = 0;
+        let touchIdMove = null, touchIdLook = null;
+        let moveJoystick = { active: false, startX: 0, startY: 0, moveX: 0, moveY: 0 };
+        let lastTouchLookPos = { x: 0, y: 0 };
+
+        // Save State
+        let playerData = {
+            x: 0,
+            y: PLAYER_HEIGHT,
+            z: 20,
+            rotY: 0
+        };
+
+        // DOM Elements
+        const container = document.getElementById('webgl-container');
+        const posDisplay = document.getElementById('lang-pos');
+        const menuModal = document.getElementById('menu-modal');
+
+        // --- Procedural Texture Generators ---
+        function createNoiseTexture(color1, color2, size = 256) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = color1;
+            ctx.fillRect(0, 0, size, size);
+
+            for (let i = 0; i < size * size * 0.1; i++) {
+                const x = Math.random() * size;
+                const y = Math.random() * size;
+                const s = Math.random() * 2 + 1;
+                ctx.fillStyle = color2;
+                ctx.fillRect(x, y, s, s);
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            return texture;
+        }
+
+        // --- System Initialization ---
+        function init() {
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+            scene.fog = new THREE.FogExp2(0xd0e0e8, 0.0012);
+
+            // Camera Setup
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
+            camera.rotation.order = 'YXZ';
+
+            // Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0;
+            container.appendChild(renderer.domElement);
+
+            // Lighting System
+            const ambientLight = new THREE.AmbientLight(0xddeeff, 0.4);
+            scene.add(ambientLight);
+
+            const sunLight = new THREE.DirectionalLight(0xfff5ea, 1.2);
+            sunLight.position.set(300, 400, 200);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 0.5;
+            sunLight.shadow.camera.far = 1000;
+            const d = 150;
+            sunLight.shadow.camera.left = -d;
+            sunLight.shadow.camera.right = d;
+            sunLight.shadow.camera.top = d;
+            sunLight.shadow.camera.bottom = -d;
+            scene.add(sunLight);
+
+            const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x3d5229, 0.4);
+            scene.add(hemiLight);
+
+            // World Generation
+            buildTerrain();
+            buildRiver();
+            buildAtelier();
+            populateEnvironment();
+
+            // Load Saved Position or Default
+            loadLocalData(false);
+            applyPlayerData();
+
+            // Event Listeners
+            setupControls();
+            window.addEventListener('resize', onWindowResize);
+
+            // Auto-Save Interval (Every 30 seconds)
+            setInterval(() => {
+                saveLocalData(false);
+            }, 30000);
+
+            // Start Main Loop
+            animate();
+        }
+
+        // --- Terrain & Environment Building ---
+        function getTerrainHeight(x, z) {
+            // Riverbed Procedural Path Logic
+            const riverX = Math.sin(z * 0.005) * 120 - 100;
+            const distToRiver = Math.abs(x - riverX);
+            
+            // Base Terrain Noise (Simple combined sine waves)
+            let h = Math.sin(x * 0.003) * 15 + Math.cos(z * 0.004) * 15;
+            h += Math.sin(x * 0.01) * 3 + Math.cos(z * 0.01) * 3;
+
+            // Flatten Center for Atelier
+            const distToCenter = Math.sqrt(x * x + z * z);
+            if (distToCenter < 150) {
+                const factor = Math.min(1, distToCenter / 150);
+                h = h * factor;
+            }
+
+            // Carve Riverbed
+            if (distToRiver < 40) {
+                const depth = Math.cos((distToRiver / 40) * Math.PI * 0.5) * 8;
+                h -= depth;
+            }
+
+            // Western Mountainous/Rocky Elevation
+            if (x < -300) {
+                const rockFactor = Math.min(1, (-x - 300) / 400);
+                h += (Math.sin(x * 0.02) * 20 + Math.cos(z * 0.02) * 20 + 30) * rockFactor;
+            }
+
+            return h;
+        }
+
+        function buildTerrain() {
+            const geo = new THREE.PlaneGeometry(FIELD_WIDTH, FIELD_DEPTH, 120, 80);
+            geo.rotateX(-Math.PI / 2);
+
+            const pos = geo.attributes.position;
+            const colors = [];
+            const cGrass = new THREE.Color(0x3a5f0b);
+            const cForest = new THREE.Color(0x1e3509);
+            const cRock = new THREE.Color(0x5a554c);
+            const cSand = new THREE.Color(0x8a7d55);
+
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const z = pos.getZ(i);
+                const h = getTerrainHeight(x, z);
+                pos.setY(i, h);
+
+                // Vertex Coloring based on features
+                const riverX = Math.sin(z * 0.005) * 120 - 100;
+                const distToRiver = Math.abs(x - riverX);
+
+                let vertexColor = cGrass.clone();
+                if (distToRiver < 25) {
+                    vertexColor.lerp(cSand, 0.8);
+                } else if (x < -300) {
+                    vertexColor.lerp(cRock, Math.min(1, (-x - 300) / 300));
+                } else if (x > 200) {
+                    vertexColor.lerp(cForest, 0.6);
+                }
+                
+                // Add minor variation
+                vertexColor.r += (Math.random() - 0.5) * 0.02;
+                vertexColor.g += (Math.random() - 0.5) * 0.02;
+                colors.push(vertexColor.r, vertexColor.g, vertexColor.b);
+            }
+
+            geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geo.computeVertexNormals();
+
+            const grassTex = createNoiseTexture('#3a5f0b', '#2d4a08');
+            grassTex.repeat.set(80, 40);
+
+            const mat = new THREE.MeshStandardMaterial({
+                vertexColors: true,
+                map: grassTex,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+
+            const terrain = new THREE.Mesh(geo, mat);
+            terrain.receiveShadow = true;
+            scene.add(terrain);
+        }
+
+        function buildRiver() {
+            const riverGeo = new THREE.PlaneGeometry(100, FIELD_DEPTH, 16, 60);
+            riverGeo.rotateX(-Math.PI / 2);
+
+            const pos = riverGeo.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const z = pos.getZ(i);
+                const riverX = Math.sin(z * 0.005) * 120 - 100;
+                pos.setX(i, pos.getX(i) + riverX);
+                pos.setY(i, -2.5); // Slightly below terrain
+            }
+            riverGeo.computeVertexNormals();
+
+            const riverMat = new THREE.MeshStandardMaterial({
+                color: 0x1a4d66,
+                roughness: 0.1,
+                metalness: 0.8,
+                transparent: true,
+                opacity: 0.75
+            });
+
+            const river = new THREE.Mesh(riverGeo, riverMat);
+            scene.add(river);
+        }
+
+        // --- Central Atelier Construction ---
+        function buildAtelier() {
+            const atelierGroup = new THREE.Group();
+            atelierGroup.position.set(0, getTerrainHeight(0, 0), 0);
+
+            // Foundation/Stone Base
+            const baseGeo = new THREE.BoxGeometry(22, 2, 22);
+            const stoneMat = new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.8 });
+            const base = new THREE.Mesh(baseGeo, stoneMat);
+            base.position.y = 1;
+            base.castShadow = true;
+            base.receiveShadow = true;
+            atelierGroup.add(base);
+
+            // Main Walls (Plaster/Wood Structure)
+            const wallGeo = new THREE.BoxGeometry(18, 10, 16);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0xdfd3c3, roughness: 0.6 });
+            const walls = new THREE.Mesh(wallGeo, wallMat);
+            walls.position.y = 7;
+            walls.castShadow = true;
+            walls.receiveShadow = true;
+            atelierGroup.add(walls);
+
+            // Roof (Steeped Timber/Tile)
+            const roofGeo = new THREE.ConeGeometry(15, 8, 4);
+            const roofMat = new THREE.MeshStandardMaterial({ color: 0x5c2c16, roughness: 0.5 });
+            const roof = new THREE.Mesh(roofGeo, roofMat);
+            roof.position.y = 16;
+            roof.rotation.y = Math.PI / 4;
+            roof.castShadow = true;
+            atelierGroup.add(roof);
+
+            // Alchemy Chimney
+            const chimneyGeo = new THREE.CylinderGeometry(1.2, 1.8, 16, 8);
+            const chimneyMat = new THREE.MeshStandardMaterial({ color: 0x332a26, roughness: 0.9 });
+            const chimney = new THREE.Mesh(chimneyGeo, chimneyMat);
+            chimney.position.set(6, 10, -4);
+            chimney.castShadow = true;
+            atelierGroup.add(chimney);
+
+            // Large Alchemy Cauldron (Outside Front)
+            const cauldronGroup = new THREE.Group();
+            cauldronGroup.position.set(0, 2, 12);
+
+            const potGeo = new THREE.SphereGeometry(2.5, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.7);
+            const potMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.3 });
+            const pot = new THREE.Mesh(potGeo, potMat);
+            pot.rotation.x = Math.PI;
+            pot.castShadow = true;
+            cauldronGroup.add(pot);
+
+            // Liquid inside cauldron
+            const liquidGeo = new THREE.CircleGeometry(2.3, 16);
+            liquidGeo.rotateX(-Math.PI / 2);
+            const liquidMat = new THREE.MeshBasicMaterial({ color: 0x33ff88, transparent: true, opacity: 0.8 });
+            const liquid = new THREE.Mesh(liquidGeo, liquidMat);
+            liquid.position.y = 0.5;
+            cauldronGroup.add(liquid);
+
+            // Glowing Light from Cauldron
+            const cauldronLight = new THREE.PointLight(0x33ff88, 2, 15);
+            cauldronLight.position.y = 2;
+            cauldronGroup.add(cauldronLight);
+
+            atelierGroup.add(cauldronGroup);
+
+            // Warm Interior/Doorway Glow
+            const doorLight = new THREE.PointLight(0xffaa44, 1.5, 20);
+            doorLight.position.set(0, 5, 9);
+            atelierGroup.add(doorLight);
+
+            scene.add(atelierGroup);
+        }
+
+        // --- Environment Props Instancing ---
+        function populateEnvironment() {
+            // Reusable Geometries & Materials
+            const trunkGeo = new THREE.CylinderGeometry(0.4, 0.8, 6, 6);
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
+
+            const leavesGeo = new THREE.ConeGeometry(3.5, 8, 5);
+            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x1b4212, roughness: 0.7 });
+
+            const rockGeo = new THREE.DodecahedronGeometry(1, 1);
+            const rockMat = new THREE.MeshStandardMaterial({ color: 0x5a5856, roughness: 0.8 });
+
+            // 1. Forest Region (East: X > 150)
+            const treeCount = 600;
+            const treeInstancedTrunk = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
+            const treeInstancedLeaves = new THREE.InstancedMesh(leavesGeo, leavesMat, treeCount);
+
+            const dummy = new THREE.Object3D();
+            let idx = 0;
+
+            for (let i = 0; i < treeCount; i++) {
+                const x = 150 + Math.random() * (FIELD_WIDTH / 2 - 200);
+                const z = (Math.random() - 0.5) * (FIELD_DEPTH - 100);
+                const h = getTerrainHeight(x, z);
+
+                const scale = 0.8 + Math.random() * 0.6;
+
+                // Trunk
+                dummy.position.set(x, h + 3 * scale, z);
+                dummy.scale.set(scale, scale, scale);
+                dummy.rotation.y = Math.random() * Math.PI;
+                dummy.updateMatrix();
+                treeInstancedTrunk.setMatrixAt(idx, dummy.matrix);
+
+                // Leaves
+                dummy.position.set(x, h + 7 * scale, z);
+                dummy.updateMatrix();
+                treeInstancedLeaves.setMatrixAt(idx, dummy.matrix);
+
+                idx++;
+            }
+            treeInstancedTrunk.castShadow = true;
+            treeInstancedLeaves.castShadow = true;
+            scene.add(treeInstancedTrunk);
+            scene.add(treeInstancedLeaves);
+
+            // 2. Rock Field Region (West: X < -200)
+            const rockCount = 350;
+            const rockInstanced = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
+
+            for (let i = 0; i < rockCount; i++) {
+                const x = -200 - Math.random() * (FIELD_WIDTH / 2 - 250);
+                const z = (Math.random() - 0.5) * (FIELD_DEPTH - 100);
+                const h = getTerrainHeight(x, z);
+
+                const scaleX = 1 + Math.random() * 3;
+                const scaleY = 1 + Math.random() * 2;
+                const scaleZ = 1 + Math.random() * 3;
+
+                dummy.position.set(x, h + scaleY * 0.5, z);
+                dummy.scale.set(scaleX, scaleY, scaleZ);
+                dummy.rotation.set(Math.random() * 0.5, Math.random() * Math.PI, Math.random() * 0.5);
+                dummy.updateMatrix();
+                rockInstanced.setMatrixAt(i, dummy.matrix);
+            }
+            rockInstanced.castShadow = true;
+            rockInstanced.receiveShadow = true;
+            scene.add(rockInstanced);
+        }
+
+        // --- Controls & Input Handling ---
+        function setupControls() {
+            // Keyboard Handlers
+            const onKeyDown = (e) => {
+                switch (e.code) {
+                    case 'KeyW': case 'ArrowUp': moveForward = true; break;
+                    case 'KeyS': case 'ArrowDown': moveBackward = true; break;
+                    case 'KeyA': case 'ArrowLeft': moveLeft = true; break;
+                    case 'KeyD': case 'ArrowRight': moveRight = true; break;
+                    case 'ShiftLeft': case 'ShiftRight': isRunning = true; break;
+                }
+            };
+
+            const onKeyUp = (e) => {
+                switch (e.code) {
+                    case 'KeyW': case 'ArrowUp': moveForward = false; break;
+                    case 'KeyS': case 'ArrowDown': moveBackward = false; break;
+                    case 'KeyA': case 'ArrowLeft': moveLeft = false; break;
+                    case 'KeyD': case 'ArrowRight': moveRight = false; break;
+                    case 'ShiftLeft': case 'ShiftRight': isRunning = false; break;
+                }
+            };
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            // Pointer Lock for PC First-Person Camera
+            renderer.domElement.addEventListener('click', () => {
+                if (menuModal.style.display !== 'block') {
+                    renderer.domElement.requestPointerLock();
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (document.pointerLockElement === renderer.domElement) {
+                    camera.rotation.y -= e.movementX * 0.002;
+                    camera.rotation.x -= e.movementY * 0.002;
+                    camera.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, camera.rotation.x));
+                }
+            });
+
+            // Touch Controls for Mobile
+            setupTouchEvents();
+
+            // UI Button Bindings
+            document.getElementById('btn-lang').addEventListener('click', toggleLanguage);
+            document.getElementById('btn-menu').addEventListener('click', toggleMenu);
+            document.getElementById('btn-close').addEventListener('click', toggleMenu);
+            document.getElementById('btn-save').addEventListener('click', () => saveLocalData(true));
+            document.getElementById('btn-load').addEventListener('click', () => loadLocalData(true));
+            document.getElementById('btn-export').addEventListener('click', exportData);
+            document.getElementById('btn-import-trigger').addEventListener('click', () => document.getElementById('file-input').click());
+            document.getElementById('file-input').addEventListener('change', importData);
+        }
+
+        function setupTouchEvents() {
+            const joystickZone = document.getElementById('joystick');
+            const knob = document.getElementById('knob');
+
+            window.addEventListener('touchstart', (e) => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    
+                    // Left side screen: Joystick
+                    if (touch.clientX < window.innerWidth / 2 && touchIdMove === null) {
+                        touchIdMove = touch.identifier;
+                        moveJoystick.active = true;
+                        moveJoystick.startX = touch.clientX;
+                        moveJoystick.startY = touch.clientY;
+                    } 
+                    // Right side screen: Camera Look
+                    else if (touch.clientX >= window.innerWidth / 2 && touchIdLook === null) {
+                        touchIdLook = touch.identifier;
+                        lastTouchLookPos = { x: touch.clientX, y: touch.clientY };
+                    }
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchmove', (e) => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+
+                    if (touch.identifier === touchIdMove) {
+                        const dx = touch.clientX - moveJoystick.startX;
+                        const dy = touch.clientY - moveJoystick.startY;
+                        const dist = Math.min(Math.sqrt(dx * dx + dy * dy), 40);
+                        const angle = Math.atan2(dy, dx);
+
+                        const moveX = Math.cos(angle) * dist;
+                        const moveY = Math.sin(angle) * dist;
+
+                        knob.style.transform = `translate(${moveX}px, ${moveY}px)`;
+
+                        moveJoystick.moveX = moveX / 40;
+                        moveJoystick.moveY = moveY / 40;
+                    }
+
+                    if (touch.identifier === touchIdLook) {
+                        const dx = touch.clientX - lastTouchLookPos.x;
+                        const dy = touch.clientY - lastTouchLookPos.y;
+
+                        camera.rotation.y -= dx * 0.004;
+                        camera.rotation.x -= dy * 0.004;
+                        camera.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, camera.rotation.x));
+
+                        lastTouchLookPos = { x: touch.clientX, y: touch.clientY };
+                    }
+                }
+            }, { passive: false });
+
+            const resetTouch = (e) => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    if (touch.identifier === touchIdMove) {
+                        touchIdMove = null;
+                        moveJoystick.active = false;
+                        moveJoystick.moveX = 0;
+                        moveJoystick.moveY = 0;
+                        knob.style.transform = `translate(0px, 0px)`;
+                    }
+                    if (touch.identifier === touchIdLook) {
+                        touchIdLook = null;
+                    }
+                }
+            };
+
+            window.addEventListener('touchend', resetTouch);
+            window.addEventListener('touchcancel', resetTouch);
+        }
+
+        // --- Language & UI System ---
+        function toggleLanguage() {
+            currentLang = currentLang === 'jp' ? 'en' : 'jp';
+            const t = TRANSLATIONS[currentLang];
+
+            document.getElementById('lang-title').innerText = t.title;
+            document.getElementById('lang-guide').innerHTML = t.guide;
+            document.getElementById('lang-menu-title').innerText = t.menuTitle;
+            document.getElementById('btn-save').innerText = t.saveBtn;
+            document.getElementById('btn-load').innerText = t.loadBtn;
+            document.getElementById('btn-export').innerText = t.exportBtn;
+            document.getElementById('btn-import-trigger').innerText = t.importBtn;
+            document.getElementById('btn-close').innerText = t.closeBtn;
+        }
+
+        function toggleMenu() {
+            if (menuModal.style.display === 'block') {
+                menuModal.style.display = 'none';
+            } else {
+                menuModal.style.display = 'block';
+                if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+            }
+        }
+
+        // --- Data Save / Load / Export / Import ---
+        function updatePlayerDataFromCamera() {
+            playerData.x = camera.position.x;
+            playerData.y = camera.position.y;
+            playerData.z = camera.position.z;
+            playerData.rotY = camera.rotation.y;
+        }
+
+        function applyPlayerData() {
+            camera.position.set(playerData.x, playerData.y, playerData.z);
+            camera.rotation.y = playerData.rotY;
+        }
+
+        function saveLocalData(showAlert = false) {
+            updatePlayerDataFromCamera();
+            localStorage.setItem('atelier_field_save', JSON.stringify(playerData));
+            if (showAlert) alert(TRANSLATIONS[currentLang].saveSuccess);
+        }
+
+        function loadLocalData(showAlert = false) {
+            const data = localStorage.getItem('atelier_field_save');
+            if (data) {
+                try {
+                    playerData = JSON.parse(data);
+                    applyPlayerData();
+                    if (showAlert) alert(TRANSLATIONS[currentLang].loadSuccess);
+                } catch (e) {
+                    console.error("Failed to parse save data", e);
+                }
+            }
+        }
+
+        function exportData() {
+            updatePlayerDataFromCamera();
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(playerData, null, 2));
+            const dlAnchorElem = document.createElement('a');
+            dlAnchorElem.setAttribute("href", dataStr);
+            dlAnchorElem.setAttribute("download", `atelier_save_${Date.now()}.json`);
+            dlAnchorElem.click();
+        }
+
+        function importData(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const parsed = JSON.parse(evt.target.result);
+                    if (typeof parsed.x === 'number' && typeof parsed.z === 'number') {
+                        playerData = parsed;
+                        applyPlayerData();
+                        saveLocalData(false);
+                        alert(TRANSLATIONS[currentLang].importSuccess);
+                        toggleMenu();
+                    } else {
+                        throw new Error();
+                    }
+                } catch (err) {
+                    alert(TRANSLATIONS[currentLang].invalidFile);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Main Movement & Physics Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+            const delta = Math.min((time - prevTime) / 1000, 0.1); // Clamp delta
+            prevTime = time;
+
+            // Deceleration (Friction)
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+
+            // Movement Directions
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+
+            // Mobile Joystick Override
+            if (moveJoystick.active) {
+                direction.z = -moveJoystick.moveY;
+                direction.x = moveJoystick.moveX;
+            }
+
+            const speed = isRunning ? 25.0 : 10.0;
+
+            if (moveForward || moveBackward || moveLeft || moveRight || moveJoystick.active) {
+                velocity.z -= direction.z * speed * 10.0 * delta;
+                velocity.x -= direction.x * speed * 10.0 * delta;
+            }
+
+            // Apply Movements in Local Camera Orientation
+            camera.translateX(-velocity.x * delta);
+            camera.translateZ(velocity.z * delta);
+
+            // Clamp Position to Map Boundaries
+            const halfW = FIELD_WIDTH / 2 - 5;
+            const halfD = FIELD_DEPTH / 2 - 5;
+            camera.position.x = Math.max(-halfW, Math.min(halfW, camera.position.x));
+            camera.position.z = Math.max(-halfD, Math.min(halfD, camera.position.z));
+
+            // Terrain Height Lock (1.8m eye level)
+            const terrainH = getTerrainHeight(camera.position.x, camera.position.z);
+            camera.position.y = terrainH + PLAYER_HEIGHT;
+
+            // HUD Update
+            posDisplay.innerText = `POS: X: ${camera.position.x.toFixed(1)}, Z: ${camera.position.z.toFixed(1)}`;
+
+            // Render
+            try {
+                renderer.render(scene, camera);
+            } catch (err) {
+                console.error("Rendering error handled:", err);
+            }
+        }
+
+        // Initialize Application on DOM Ready
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
