@@ -302,6 +302,9 @@
         let ambientLight, sunLight, hemiLight;
         let sky, skyUniforms, sunVec;
         let stars;
+        let sunSprite, moonSprite;
+        const cloudSprites = [];
+        let envTime = 0;
         let dayTime = 0.28;           // 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
         const DAY_CYCLE_SEC = 480;    // 8分で1日
         let lastShadowElevation = null;
@@ -408,6 +411,9 @@
                 stars = new THREE.Points(geo, mat);
                 scene.add(stars);
             })();
+
+            // Sky objects (sun, moon, clouds)
+            buildSkyObjects();
 
             // World Generation
             buildTerrain();
@@ -706,9 +712,122 @@
             });
         }
 
+        // --- Sky Object Textures (canvas-generated, no external files) ---
+        function makeSunTexture() {
+            const sz = 256, c = 128;
+            const cv = document.createElement('canvas');
+            cv.width = cv.height = sz;
+            const ctx = cv.getContext('2d');
+            // Core glow layers
+            [
+                [0,    'rgba(255,255,240,1.0)'],
+                [0.18, 'rgba(255,240,120,0.95)'],
+                [0.38, 'rgba(255,180,40,0.6)'],
+                [0.62, 'rgba(255,120,10,0.25)'],
+                [1.0,  'rgba(255,80,0,0)'],
+            ].reduce((g, [s, col]) => { g.addColorStop(s, col); return g; },
+                ctx.createRadialGradient(c, c, 0, c, c, c));
+            const g = ctx.createRadialGradient(c, c, 0, c, c, c);
+            ['rgba(255,255,240,1.0)','rgba(255,240,120,0.95)','rgba(255,180,40,0.6)',
+             'rgba(255,120,10,0.25)','rgba(255,80,0,0)'].forEach((col, i, a) => {
+                g.addColorStop(i / (a.length - 1), col);
+            });
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, sz, sz);
+            return new THREE.CanvasTexture(cv);
+        }
+
+        function makeMoonTexture() {
+            const sz = 256, c = 128, r = 90;
+            const cv = document.createElement('canvas');
+            cv.width = cv.height = sz;
+            const ctx = cv.getContext('2d');
+            // Moon disc with limb-darkening
+            const g = ctx.createRadialGradient(c - 18, c - 18, 0, c, c, r);
+            g.addColorStop(0,   'rgba(245,250,255,1.0)');
+            g.addColorStop(0.6, 'rgba(215,228,248,1.0)');
+            g.addColorStop(1.0, 'rgba(180,200,230,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(c, c, r, 0, Math.PI * 2); ctx.fill();
+            // Craters
+            [[c+28, c-18, 16], [c-38, c+28, 22], [c+10, c+42, 10],
+             [c-22, c-38, 13], [c+52, c+18, 9]].forEach(([cx, cy, cr]) => {
+                const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, cr);
+                cg.addColorStop(0,   'rgba(140,160,195,0.45)');
+                cg.addColorStop(0.7, 'rgba(170,188,215,0.15)');
+                cg.addColorStop(1.0, 'rgba(195,210,235,0)');
+                ctx.fillStyle = cg;
+                ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI * 2); ctx.fill();
+            });
+            return new THREE.CanvasTexture(cv);
+        }
+
+        function makeCloudTexture(seed) {
+            const w = 512, h = 256;
+            const cv = document.createElement('canvas');
+            cv.width = w; cv.height = h;
+            const ctx = cv.getContext('2d');
+            // Deterministic pseudo-random from seed
+            const rng = n => { const v = Math.sin(seed * 127.1 + n * 311.7) * 43758.5453; return v - Math.floor(v); };
+            const cx = w * (0.3 + rng(0) * 0.4);
+            const cy = h * (0.5 + rng(1) * 0.2);
+            const blobs = 5 + Math.floor(rng(2) * 4);
+            for (let i = 0; i < blobs; i++) {
+                const bx = cx + (rng(i*4)   - 0.5) * 260;
+                const by = cy + (rng(i*4+1) - 0.5) * 70;
+                const br = 35 + rng(i*4+2) * 85;
+                const ba = 0.6 + rng(i*4+3) * 0.35;
+                const g = ctx.createRadialGradient(bx, by, 0, bx, by, br);
+                g.addColorStop(0,   `rgba(255,255,255,${ba})`);
+                g.addColorStop(0.5, `rgba(240,245,255,${(ba*0.55).toFixed(2)})`);
+                g.addColorStop(1.0, 'rgba(220,235,255,0)');
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.ellipse(bx, by, br, br * (0.45 + rng(i)*0.3), 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            return new THREE.CanvasTexture(cv);
+        }
+
+        function buildSkyObjects() {
+            const spriteMat = (tex, blend) => new THREE.SpriteMaterial({
+                map: tex, transparent: true, depthWrite: false, blending: blend
+            });
+
+            // Sun
+            sunSprite = new THREE.Sprite(spriteMat(makeSunTexture(), THREE.AdditiveBlending));
+            sunSprite.scale.setScalar(120);
+            scene.add(sunSprite);
+
+            // Moon
+            moonSprite = new THREE.Sprite(spriteMat(makeMoonTexture(), THREE.NormalBlending));
+            moonSprite.scale.setScalar(60);
+            scene.add(moonSprite);
+
+            // Clouds — 18 sprites with 4 texture variants, scattered at altitude
+            const cloudTextures = [0, 1, 2, 3].map(makeCloudTexture);
+            for (let i = 0; i < 18; i++) {
+                const mat = new THREE.SpriteMaterial({
+                    map: cloudTextures[i % 4],
+                    transparent: true, depthWrite: false, opacity: 0.82
+                });
+                const sp = new THREE.Sprite(mat);
+                const x = (Math.random() - 0.5) * 1800;
+                const z = (Math.random() - 0.5) * 1800;
+                const y = 340 + Math.random() * 160;
+                sp.position.set(x, y, z);
+                const sw = 280 + Math.random() * 320;
+                sp.scale.set(sw, sw * 0.38, 1);
+                sp.userData.speed = (0.4 + Math.random() * 0.8) * (Math.random() < 0.5 ? 1 : -1);
+                cloudSprites.push(sp);
+                scene.add(sp);
+            }
+        }
+
         // --- Day/Night Cycle ---
         const _tmpColor = new THREE.Color();
         function updateDayCycle(delta) {
+            envTime += delta;
             dayTime = (dayTime + delta / DAY_CYCLE_SEC) % 1.0;
 
             // Sun elevation: -75° (midnight) → 0° (horizon) → +75° (noon)
@@ -765,8 +884,40 @@
             // Tone mapping exposure (brighter at noon, dim at night)
             renderer.toneMappingExposure = 0.15 + horizonFactor * 0.3 + dayFactor * 0.7;
 
-            // Stars fade in at night
-            stars.material.opacity = Math.max(0, Math.min(1, nightFactor * 2));
+            // Stars — fade + gentle twinkle
+            const twinkle = 0.85 + Math.sin(envTime * 2.3) * 0.08 + Math.sin(envTime * 5.1) * 0.07;
+            stars.material.opacity = Math.max(0, Math.min(1, nightFactor * 2)) * twinkle;
+
+            // Sun sprite — follows sunVec, fades near horizon
+            const sunDist = 800;
+            sunSprite.position.copy(sunVec).multiplyScalar(sunDist);
+            sunSprite.material.opacity = Math.max(0, Math.min(1, (elevation + 5) / 20));
+            // Scale up slightly at dawn/dusk (atmospheric magnification)
+            const sunScale = 120 + horizonNear * 30;
+            sunSprite.scale.setScalar(sunScale);
+
+            // Moon sprite — opposite side from sun, visible at night
+            const moonElev = -elevation; // moon rises when sun sets
+            const moonPhi  = THREE.MathUtils.degToRad(90 - moonElev);
+            const moonVec  = new THREE.Vector3().setFromSphericalCoords(1, moonPhi, Math.PI);
+            moonSprite.position.copy(moonVec).multiplyScalar(sunDist * 0.9);
+            moonSprite.material.opacity = Math.max(0, Math.min(1, nightFactor * 1.5));
+
+            // Clouds — drift + fade based on time of day
+            const cloudOpacity = Math.max(0.2, Math.min(0.85, 0.4 + dayFactor * 0.45));
+            cloudSprites.forEach(sp => {
+                sp.position.x += sp.userData.speed * delta;
+                // Wrap around field boundary
+                if (sp.position.x >  900) sp.position.x = -900;
+                if (sp.position.x < -900) sp.position.x =  900;
+                sp.material.opacity = cloudOpacity;
+                // Night clouds slightly darker/blue-tinted
+                if (nightFactor > 0.5) {
+                    sp.material.color.setRGB(0.6, 0.65, 0.8);
+                } else {
+                    sp.material.color.setRGB(1, 1, 1);
+                }
+            });
 
             // Re-bake shadows when sun elevation changes by >8°
             if (lastShadowElevation === null || Math.abs(elevation - lastShadowElevation) > 8) {
