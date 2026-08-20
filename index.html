@@ -305,6 +305,8 @@
         let sunSprite, moonSprite;
         const cloudSprites = [];
         let envTime = 0;
+        let riverMesh = null;
+        let riverBaseY = null;
         let dayTime = 0.28;           // 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
         const DAY_CYCLE_SEC = 480;    // 8分で1日
         let lastShadowElevation = null;
@@ -540,28 +542,58 @@
         }
 
         function buildRiver() {
-            const riverGeo = new THREE.PlaneGeometry(100, FIELD_DEPTH, 16, 60);
+            // Main pond/water surface — wide enough to avoid hard edge cutoff
+            const riverGeo = new THREE.PlaneGeometry(160, FIELD_DEPTH, 32, 120);
             riverGeo.rotateX(-Math.PI / 2);
 
             const pos = riverGeo.attributes.position;
+            // Store base X/Z positions; set Y to -3.2 (below terrain so edges fade under ground)
+            riverBaseY = new Float32Array(pos.count);
             for (let i = 0; i < pos.count; i++) {
                 const z = pos.getZ(i);
                 const riverX = Math.sin(z * 0.005) * 120 - 100;
                 pos.setX(i, pos.getX(i) + riverX);
-                pos.setY(i, -2.5); // Slightly below terrain
+                pos.setY(i, -3.2);
+                riverBaseY[i] = -3.2;
             }
             riverGeo.computeVertexNormals();
+            pos.needsUpdate = true;
 
             const riverMat = new THREE.MeshStandardMaterial({
-                color: 0x1a4d66,
-                roughness: 0.1,
-                metalness: 0.8,
+                color: 0x1a7a9a,
+                roughness: 0.04,
+                metalness: 0.92,
                 transparent: true,
-                opacity: 0.75
+                opacity: 0.82,
+                depthWrite: false,
             });
 
-            const river = new THREE.Mesh(riverGeo, riverMat);
-            scene.add(river);
+            riverMesh = new THREE.Mesh(riverGeo, riverMat);
+            riverMesh.renderOrder = 1;
+            scene.add(riverMesh);
+
+            // Shore foam — wider, lighter, slightly above water
+            const foamGeo = new THREE.PlaneGeometry(220, FIELD_DEPTH, 8, 30);
+            foamGeo.rotateX(-Math.PI / 2);
+            const fpos = foamGeo.attributes.position;
+            for (let i = 0; i < fpos.count; i++) {
+                const z = fpos.getZ(i);
+                const riverX = Math.sin(z * 0.005) * 120 - 100;
+                fpos.setX(i, fpos.getX(i) + riverX);
+                fpos.setY(i, -3.15);
+            }
+            foamGeo.computeVertexNormals();
+            const foamMat = new THREE.MeshStandardMaterial({
+                color: 0x7ab8cc,
+                roughness: 0.6,
+                metalness: 0.1,
+                transparent: true,
+                opacity: 0.28,
+                depthWrite: false,
+            });
+            const foam = new THREE.Mesh(foamGeo, foamMat);
+            foam.renderOrder = 0;
+            scene.add(foam);
         }
 
         // --- Central Atelier Construction ---
@@ -1202,6 +1234,22 @@
 
             // Day/night cycle update
             updateDayCycle(delta);
+
+            // Animate water waves
+            if (riverMesh && riverBaseY) {
+                const wpos = riverMesh.geometry.attributes.position;
+                const t = time * 0.001;
+                for (let i = 0; i < wpos.count; i++) {
+                    const x = wpos.getX(i);
+                    const z = wpos.getZ(i);
+                    const wave = Math.sin(x * 0.08 + t * 1.2) * 0.18
+                               + Math.sin(z * 0.05 + t * 0.9) * 0.12
+                               + Math.sin((x + z) * 0.04 + t * 1.6) * 0.08;
+                    wpos.setY(i, riverBaseY[i] + wave);
+                }
+                wpos.needsUpdate = true;
+                riverMesh.geometry.computeVertexNormals();
+            }
 
             // Re-bake shadows when flagged (sun moved or new objects loaded)
             if (!shadowsReady) {
