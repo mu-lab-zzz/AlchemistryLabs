@@ -610,13 +610,26 @@
             }
             const strength = [0.18, 0.28, 0.22, 0.38][type];
             const pos = geo.attributes.position;
+
+            // Three.jsの多面体ジオメトリは非インデックス形式のため、隣接面が同一座標の頂点を
+            // 別バッファエントリとして保持する。バッファインデックスiでランダムを生成すると
+            // 同位置の頂点が異なる量だけ移動して面間に隙間が開く。
+            // → 元の空間座標をキーにして同一位置の頂点には同じ移動量を適用する。
+            const perturbMap = new Map();
             for (let i = 0; i < pos.count; i++) {
-                pos.setXYZ(i,
-                    pos.getX(i) + (Math.random() - 0.5) * strength,
-                    pos.getY(i) + (Math.random() - 0.5) * strength,
-                    pos.getZ(i) + (Math.random() - 0.5) * strength
-                );
+                const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+                const key = `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`;
+                if (!perturbMap.has(key)) {
+                    perturbMap.set(key, [
+                        (Math.random() - 0.5) * strength,
+                        (Math.random() - 0.5) * strength,
+                        (Math.random() - 0.5) * strength,
+                    ]);
+                }
+                const [dx, dy, dz] = perturbMap.get(key);
+                pos.setXYZ(i, x + dx, y + dy, z + dz);
             }
+
             geo.computeVertexNormals();
             return geo;
         }
