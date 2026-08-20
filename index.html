@@ -294,6 +294,8 @@
             rotY: 0
         };
 
+        let shadowsReady = false;
+
         // DOM Elements
         const container = document.getElementById('webgl-container');
         const posDisplay = document.getElementById('lang-pos');
@@ -340,6 +342,7 @@
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             renderer.toneMappingExposure = 1.0;
+            renderer.shadowMap.autoUpdate = false; // static scene: bake once
             container.appendChild(renderer.domElement);
 
             // Lighting System
@@ -419,57 +422,72 @@
         }
 
         function buildTerrain() {
-            const geo = new THREE.PlaneGeometry(FIELD_WIDTH, FIELD_DEPTH, 120, 80);
-            geo.rotateX(-Math.PI / 2);
-
-            const pos = geo.attributes.position;
-            const colors = [];
-            const cGrass = new THREE.Color(0x3a5f0b);
-            const cForest = new THREE.Color(0x1e3509);
-            const cRock = new THREE.Color(0x5a554c);
-            const cSand = new THREE.Color(0x8a7d55);
-
-            for (let i = 0; i < pos.count; i++) {
-                const x = pos.getX(i);
-                const z = pos.getZ(i);
-                const h = getTerrainHeight(x, z);
-                pos.setY(i, h);
-
-                // Vertex Coloring based on features
-                const riverX = Math.sin(z * 0.005) * 120 - 100;
-                const distToRiver = Math.abs(x - riverX);
-
-                let vertexColor = cGrass.clone();
-                if (distToRiver < 25) {
-                    vertexColor.lerp(cSand, 0.8);
-                } else if (x < -300) {
-                    vertexColor.lerp(cRock, Math.min(1, (-x - 300) / 300));
-                } else if (x > 200) {
-                    vertexColor.lerp(cForest, 0.6);
-                }
-                
-                // Add minor variation
-                vertexColor.r += (Math.random() - 0.5) * 0.02;
-                vertexColor.g += (Math.random() - 0.5) * 0.02;
-                colors.push(vertexColor.r, vertexColor.g, vertexColor.b);
-            }
-
-            geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-            geo.computeVertexNormals();
+            // Split into 10×5 chunks — Three.js frustum-culls each independently.
+            // Same vertex density (120/10=12 segs X, 80/5=16 segs Z) → identical look.
+            const CHUNKS_X = 10, CHUNKS_Z = 5;
+            const chunkW = FIELD_WIDTH  / CHUNKS_X; // 200
+            const chunkD = FIELD_DEPTH  / CHUNKS_Z; // 200
+            const segsX  = 120 / CHUNKS_X;          // 12
+            const segsZ  = 80  / CHUNKS_Z;           // 16
 
             const grassTex = createNoiseTexture('#3a5f0b', '#2d4a08');
-            grassTex.repeat.set(80, 40);
+            // Same texel density per world unit as original repeat(80,40) over full field
+            grassTex.repeat.set(chunkW * 80 / FIELD_WIDTH, chunkD * 40 / FIELD_DEPTH); // 8,8
 
-            const mat = new THREE.MeshStandardMaterial({
+            const sharedMat = new THREE.MeshStandardMaterial({
                 vertexColors: true,
                 map: grassTex,
                 roughness: 0.9,
                 metalness: 0.1
             });
 
-            const terrain = new THREE.Mesh(geo, mat);
-            terrain.receiveShadow = true;
-            scene.add(terrain);
+            const cGrass = new THREE.Color(0x3a5f0b);
+            const cForest = new THREE.Color(0x1e3509);
+            const cRock   = new THREE.Color(0x5a554c);
+            const cSand   = new THREE.Color(0x8a7d55);
+
+            for (let cx = 0; cx < CHUNKS_X; cx++) {
+                for (let cz = 0; cz < CHUNKS_Z; cz++) {
+                    const worldCX = -FIELD_WIDTH / 2 + (cx + 0.5) * chunkW;
+                    const worldCZ = -FIELD_DEPTH / 2 + (cz + 0.5) * chunkD;
+
+                    const geo = new THREE.PlaneGeometry(chunkW, chunkD, segsX, segsZ);
+                    geo.rotateX(-Math.PI / 2);
+
+                    const pos = geo.attributes.position;
+                    const colors = [];
+
+                    for (let i = 0; i < pos.count; i++) {
+                        // local → world coords for height/color calculation
+                        const wx = pos.getX(i) + worldCX;
+                        const wz = pos.getZ(i) + worldCZ;
+                        const h  = getTerrainHeight(wx, wz);
+                        pos.setY(i, h);
+
+                        const riverX      = Math.sin(wz * 0.005) * 120 - 100;
+                        const distToRiver = Math.abs(wx - riverX);
+                        let vc = cGrass.clone();
+                        if (distToRiver < 25) {
+                            vc.lerp(cSand, 0.8);
+                        } else if (wx < -300) {
+                            vc.lerp(cRock, Math.min(1, (-wx - 300) / 300));
+                        } else if (wx > 200) {
+                            vc.lerp(cForest, 0.6);
+                        }
+                        vc.r += (Math.random() - 0.5) * 0.02;
+                        vc.g += (Math.random() - 0.5) * 0.02;
+                        colors.push(vc.r, vc.g, vc.b);
+                    }
+
+                    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                    geo.computeVertexNormals();
+
+                    const chunk = new THREE.Mesh(geo, sharedMat);
+                    chunk.position.set(worldCX, 0, worldCZ);
+                    chunk.receiveShadow = true;
+                    scene.add(chunk);
+                }
+            }
         }
 
         function buildRiver() {
@@ -573,72 +591,85 @@
 
         // --- Environment Props Instancing ---
         function populateEnvironment() {
-            // Reusable Geometries & Materials
-            const trunkGeo = new THREE.CylinderGeometry(0.4, 0.8, 6, 6);
-            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
-
+            const trunkGeo  = new THREE.CylinderGeometry(0.4, 0.8, 6, 6);
+            const trunkMat  = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
             const leavesGeo = new THREE.ConeGeometry(3.5, 8, 5);
             const leavesMat = new THREE.MeshStandardMaterial({ color: 0x1b4212, roughness: 0.7 });
-
-            const rockGeo = new THREE.DodecahedronGeometry(1, 1);
-            const rockMat = new THREE.MeshStandardMaterial({ color: 0x5a5856, roughness: 0.8 });
-
-            // 1. Forest Region (East: X > 150)
-            const treeCount = 600;
-            const treeInstancedTrunk = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
-            const treeInstancedLeaves = new THREE.InstancedMesh(leavesGeo, leavesMat, treeCount);
+            const rockGeo   = new THREE.DodecahedronGeometry(1, 1);
+            const rockMat   = new THREE.MeshStandardMaterial({ color: 0x5a5856, roughness: 0.8 });
 
             const dummy = new THREE.Object3D();
-            let idx = 0;
 
-            for (let i = 0; i < treeCount; i++) {
-                const x = 150 + Math.random() * (FIELD_WIDTH / 2 - 200);
-                const z = (Math.random() - 0.5) * (FIELD_DEPTH - 100);
-                const h = getTerrainHeight(x, z);
-
-                const scale = 0.8 + Math.random() * 0.6;
-
-                // Trunk
-                dummy.position.set(x, h + 3 * scale, z);
-                dummy.scale.set(scale, scale, scale);
-                dummy.rotation.y = Math.random() * Math.PI;
-                dummy.updateMatrix();
-                treeInstancedTrunk.setMatrixAt(idx, dummy.matrix);
-
-                // Leaves
-                dummy.position.set(x, h + 7 * scale, z);
-                dummy.updateMatrix();
-                treeInstancedLeaves.setMatrixAt(idx, dummy.matrix);
-
-                idx++;
+            // Split a list of items into a spatial grid of InstancedMeshes.
+            // Smaller bounding boxes → Three.js frustum-culls off-screen cells independently.
+            function addSpatialGrid(items, cellsX, cellsZ, xMin, xMax, zMin, zMax, buildCell) {
+                const cw = (xMax - xMin) / cellsX;
+                const cd = (zMax - zMin) / cellsZ;
+                for (let cx = 0; cx < cellsX; cx++) {
+                    for (let cz = 0; cz < cellsZ; cz++) {
+                        const cell = items.filter(t =>
+                            t.x >= xMin + cx * cw && t.x < xMin + (cx + 1) * cw &&
+                            t.z >= zMin + cz * cd && t.z < zMin + (cz + 1) * cd
+                        );
+                        if (cell.length > 0) buildCell(cell);
+                    }
+                }
             }
-            treeInstancedTrunk.castShadow = true;
-            treeInstancedLeaves.castShadow = true;
-            scene.add(treeInstancedTrunk);
-            scene.add(treeInstancedLeaves);
 
-            // 2. Rock Field Region (West: X < -200)
-            const rockCount = 350;
-            const rockInstanced = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
+            // 1. Forest Region (East: X 150→950) — 3×2 grid = 6 cells
+            const trees = Array.from({ length: 600 }, () => ({
+                x: 150 + Math.random() * (FIELD_WIDTH / 2 - 200),
+                z: (Math.random() - 0.5) * (FIELD_DEPTH - 100),
+                s: 0.8 + Math.random() * 0.6,
+                ry: Math.random() * Math.PI
+            }));
 
-            for (let i = 0; i < rockCount; i++) {
-                const x = -200 - Math.random() * (FIELD_WIDTH / 2 - 250);
-                const z = (Math.random() - 0.5) * (FIELD_DEPTH - 100);
-                const h = getTerrainHeight(x, z);
+            addSpatialGrid(trees, 3, 2, 150, 950, -450, 450, (cell) => {
+                const trunk  = new THREE.InstancedMesh(trunkGeo, trunkMat, cell.length);
+                const leaves = new THREE.InstancedMesh(leavesGeo, leavesMat, cell.length);
+                cell.forEach((t, i) => {
+                    const h = getTerrainHeight(t.x, t.z);
+                    dummy.position.set(t.x, h + 3 * t.s, t.z);
+                    dummy.scale.setScalar(t.s);
+                    dummy.rotation.y = t.ry;
+                    dummy.updateMatrix();
+                    trunk.setMatrixAt(i, dummy.matrix);
+                    dummy.position.y = h + 7 * t.s;
+                    dummy.updateMatrix();
+                    leaves.setMatrixAt(i, dummy.matrix);
+                });
+                trunk.castShadow = true;
+                leaves.castShadow = true;
+                scene.add(trunk);
+                scene.add(leaves);
+            });
 
-                const scaleX = 1 + Math.random() * 3;
-                const scaleY = 1 + Math.random() * 2;
-                const scaleZ = 1 + Math.random() * 3;
+            // 2. Rock Field Region (West: X -950→-200) — 3×2 grid = 6 cells
+            const rocks = Array.from({ length: 350 }, () => ({
+                x: -200 - Math.random() * (FIELD_WIDTH / 2 - 250),
+                z: (Math.random() - 0.5) * (FIELD_DEPTH - 100),
+                sx: 1 + Math.random() * 3,
+                sy: 1 + Math.random() * 2,
+                sz: 1 + Math.random() * 3,
+                rx: Math.random() * 0.5,
+                ry: Math.random() * Math.PI,
+                rz: Math.random() * 0.5
+            }));
 
-                dummy.position.set(x, h + scaleY * 0.5, z);
-                dummy.scale.set(scaleX, scaleY, scaleZ);
-                dummy.rotation.set(Math.random() * 0.5, Math.random() * Math.PI, Math.random() * 0.5);
-                dummy.updateMatrix();
-                rockInstanced.setMatrixAt(i, dummy.matrix);
-            }
-            rockInstanced.castShadow = true;
-            rockInstanced.receiveShadow = true;
-            scene.add(rockInstanced);
+            addSpatialGrid(rocks, 3, 2, -950, -200, -450, 450, (cell) => {
+                const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, cell.length);
+                cell.forEach((r, i) => {
+                    const h = getTerrainHeight(r.x, r.z);
+                    dummy.position.set(r.x, h + r.sy * 0.5, r.z);
+                    dummy.scale.set(r.sx, r.sy, r.sz);
+                    dummy.rotation.set(r.rx, r.ry, r.rz);
+                    dummy.updateMatrix();
+                    rockInst.setMatrixAt(i, dummy.matrix);
+                });
+                rockInst.castShadow = true;
+                rockInst.receiveShadow = true;
+                scene.add(rockInst);
+            });
         }
 
         // --- Controls & Input Handling ---
@@ -915,12 +946,13 @@
             // HUD Update
             posDisplay.innerText = `POS: X: ${camera.position.x.toFixed(1)}, Z: ${camera.position.z.toFixed(1)}`;
 
-            // Render
-            try {
-                renderer.render(scene, camera);
-            } catch (err) {
-                console.error("Rendering error handled:", err);
+            // Bake shadow maps on first frame only (scene is fully static)
+            if (!shadowsReady) {
+                renderer.shadowMap.needsUpdate = true;
+                shadowsReady = true;
             }
+
+            renderer.render(scene, camera);
         }
 
         // Initialize Application on DOM Ready
