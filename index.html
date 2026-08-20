@@ -285,7 +285,7 @@
         // Mobile Touch State
         let touchLookX = 0, touchLookY = 0;
         let touchIdMove = null, touchIdLook = null;
-        let moveJoystick = { active: false, startX: 0, startY: 0, moveX: 0, moveY: 0 };
+        let moveJoystick = { active: false, startX: 0, startY: 0, moveX: 0, moveY: 0, dist: 0 };
         let lastTouchLookPos = { x: 0, y: 0 };
 
         // Save State
@@ -1043,16 +1043,23 @@
                     if (touch.identifier === touchIdMove) {
                         const dx = touch.clientX - moveJoystick.startX;
                         const dy = touch.clientY - moveJoystick.startY;
-                        const dist = Math.min(Math.sqrt(dx * dx + dy * dy), 40);
+                        const rawDist = Math.sqrt(dx * dx + dy * dy);
+                        const dist = Math.min(rawDist, 40);
                         const angle = Math.atan2(dy, dx);
 
                         const moveX = Math.cos(angle) * dist;
                         const moveY = Math.sin(angle) * dist;
 
                         knob.style.transform = `translate(${moveX}px, ${moveY}px)`;
+                        // 70%以上の押し込みで走る（視覚フィードバック付き）
+                        const sprinting = dist > 28;
+                        knob.style.background = sprinting
+                            ? 'radial-gradient(circle, #ff6633 0%, #cc2200 100%)'
+                            : 'radial-gradient(circle, #ffffff 0%, #aaaaaa 100%)';
 
                         moveJoystick.moveX = moveX / 40;
                         moveJoystick.moveY = moveY / 40;
+                        moveJoystick.dist = dist;
                     }
 
                     if (touch.identifier === touchIdLook) {
@@ -1076,7 +1083,9 @@
                         moveJoystick.active = false;
                         moveJoystick.moveX = 0;
                         moveJoystick.moveY = 0;
+                        moveJoystick.dist = 0;
                         knob.style.transform = `translate(0px, 0px)`;
+                        knob.style.background = 'radial-gradient(circle, #ffffff 0%, #aaaaaa 100%)';
                     }
                     if (touch.identifier === touchIdLook) {
                         touchIdLook = null;
@@ -1208,7 +1217,8 @@
                 direction.x = moveJoystick.moveX;
             }
 
-            const speed = isRunning ? 25.0 : 10.0;
+            const touchSprinting = moveJoystick.active && moveJoystick.dist > 28;
+            const speed = (isRunning || touchSprinting) ? 25.0 : 10.0;
 
             if (moveForward || moveBackward || moveLeft || moveRight || moveJoystick.active) {
                 velocity.z -= direction.z * speed * 10.0 * delta;
