@@ -233,6 +233,7 @@
 
     <!-- Three.js Import -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 
     <script>
         // --- Localization Texts ---
@@ -342,6 +343,7 @@
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             renderer.toneMappingExposure = 1.0;
+            renderer.outputEncoding = THREE.sRGBEncoding; // PBRテクスチャの正確なガンマ
             renderer.shadowMap.autoUpdate = false; // static scene: bake once
             container.appendChild(renderer.domElement);
 
@@ -370,7 +372,8 @@
             buildTerrain();
             buildRiver();
             buildAtelier();
-            populateEnvironment();
+            populateRocks();
+            loadTrees(); // GLBを非同期で逐次ロード、ロード完了ごとに追加
 
             // Load Saved Position or Default
             loadLocalData(false);
@@ -637,63 +640,30 @@
         // セルごとに異なるジオメトリタイプを割り当て（地質的な一貫性）
         const ROCK_GEO_TYPES = [0, 1, 2, 3, 1, 0];
 
-        // --- Environment Props Instancing ---
-        function populateEnvironment() {
-            const trunkGeo  = new THREE.CylinderGeometry(0.4, 0.8, 6, 6);
-            const trunkMat  = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
-            const leavesGeo = new THREE.ConeGeometry(3.5, 8, 5);
-            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x1b4212, roughness: 0.7 });
+        // Split a list of items into a spatial grid of InstancedMeshes.
+        // Smaller bounding boxes → Three.js frustum-culls off-screen cells independently.
+        function addSpatialGrid(items, cellsX, cellsZ, xMin, xMax, zMin, zMax, buildCell) {
+            const cw = (xMax - xMin) / cellsX;
+            const cd = (zMax - zMin) / cellsZ;
+            let cellIdx = 0;
+            for (let cx = 0; cx < cellsX; cx++) {
+                for (let cz = 0; cz < cellsZ; cz++) {
+                    const cell = items.filter(t =>
+                        t.x >= xMin + cx * cw && t.x < xMin + (cx + 1) * cw &&
+                        t.z >= zMin + cz * cd && t.z < zMin + (cz + 1) * cd
+                    );
+                    if (cell.length > 0) buildCell(cell, cellIdx);
+                    cellIdx++;
+                }
+            }
+        }
 
+        // --- Rock Field Instancing ---
+        function populateRocks() {
             const dummy = new THREE.Object3D();
             const tmpColor = new THREE.Color();
 
-            // Split a list of items into a spatial grid of InstancedMeshes.
-            // Smaller bounding boxes → Three.js frustum-culls off-screen cells independently.
-            function addSpatialGrid(items, cellsX, cellsZ, xMin, xMax, zMin, zMax, buildCell) {
-                const cw = (xMax - xMin) / cellsX;
-                const cd = (zMax - zMin) / cellsZ;
-                let cellIdx = 0;
-                for (let cx = 0; cx < cellsX; cx++) {
-                    for (let cz = 0; cz < cellsZ; cz++) {
-                        const cell = items.filter(t =>
-                            t.x >= xMin + cx * cw && t.x < xMin + (cx + 1) * cw &&
-                            t.z >= zMin + cz * cd && t.z < zMin + (cz + 1) * cd
-                        );
-                        if (cell.length > 0) buildCell(cell, cellIdx);
-                        cellIdx++;
-                    }
-                }
-            }
-
-            // 1. Forest Region (East: X 150→950) — 3×2 grid = 6 cells
-            const trees = Array.from({ length: 600 }, () => ({
-                x: 150 + Math.random() * (FIELD_WIDTH / 2 - 200),
-                z: (Math.random() - 0.5) * (FIELD_DEPTH - 100),
-                s: 0.8 + Math.random() * 0.6,
-                ry: Math.random() * Math.PI
-            }));
-
-            addSpatialGrid(trees, 3, 2, 150, 950, -450, 450, (cell) => {
-                const trunk  = new THREE.InstancedMesh(trunkGeo, trunkMat, cell.length);
-                const leaves = new THREE.InstancedMesh(leavesGeo, leavesMat, cell.length);
-                cell.forEach((t, i) => {
-                    const h = getTerrainHeight(t.x, t.z);
-                    dummy.position.set(t.x, h + 3 * t.s, t.z);
-                    dummy.scale.setScalar(t.s);
-                    dummy.rotation.y = t.ry;
-                    dummy.updateMatrix();
-                    trunk.setMatrixAt(i, dummy.matrix);
-                    dummy.position.y = h + 7 * t.s;
-                    dummy.updateMatrix();
-                    leaves.setMatrixAt(i, dummy.matrix);
-                });
-                trunk.castShadow = true;
-                leaves.castShadow = true;
-                scene.add(trunk);
-                scene.add(leaves);
-            });
-
-            // 2. Rock Field Region (West: X -950→-200) — 3×2 grid = 6 cells
+            // Rock Field Region (West: X -950→-200) — 3×2 grid = 6 cells
             // 冪乗則サイズ分布（小石多め、たまに大岩）＋扁平率でバリエーション
             const rocks = Array.from({ length: 350 }, () => {
                 const roll = Math.random();
@@ -736,6 +706,61 @@
                 rockInst.castShadow = true;
                 rockInst.receiveShadow = true;
                 scene.add(rockInst);
+            });
+        }
+
+        // --- GLB Tree Loading (Poly Haven) ---
+        function loadTrees() {
+            const loader = new THREE.GLTFLoader();
+            const dummy = new THREE.Object3D();
+
+            // [model path, count, xMin, xMax, scale range [min,max]]
+            const TREE_CONFIGS = [
+                ['models/pine_tree_01.glb',       40,  150, 650, [4, 9]],
+                ['models/fir_tree_01.glb',         35,  400, 950, [4, 8]],
+                ['models/island_tree_01.glb',      10,  160, 400, [5, 10]],
+                ['models/island_tree_02.glb',      10,  160, 400, [5, 10]],
+                ['models/dead_tree_trunk_02.glb',  20,  150, 950, [3, 7]],
+            ];
+
+            TREE_CONFIGS.forEach(([path, count, xMin, xMax, [sMin, sMax]]) => {
+                loader.load(path, (gltf) => {
+                    const root = gltf.scene;
+
+                    // Enable shadows and correct encoding on every mesh in the model
+                    root.traverse((node) => {
+                        if (node.isMesh) {
+                            node.castShadow = true;
+                            node.receiveShadow = true;
+                            if (node.material) {
+                                if (Array.isArray(node.material)) {
+                                    node.material.forEach(m => { m.needsUpdate = true; });
+                                } else {
+                                    node.material.needsUpdate = true;
+                                }
+                            }
+                        }
+                    });
+
+                    for (let i = 0; i < count; i++) {
+                        const x  = xMin + Math.random() * (xMax - xMin);
+                        const z  = (Math.random() - 0.5) * (FIELD_DEPTH - 100);
+                        const h  = getTerrainHeight(x, z);
+                        const s  = sMin + Math.random() * (sMax - sMin);
+                        const ry = Math.random() * Math.PI * 2;
+
+                        const clone = root.clone();
+                        clone.position.set(x, h, z);
+                        clone.scale.setScalar(s);
+                        clone.rotation.y = ry;
+                        scene.add(clone);
+                    }
+
+                    // Re-bake shadows to include newly added trees
+                    shadowsReady = false;
+                }, undefined, (err) => {
+                    console.warn('Tree model failed to load:', path, err);
+                });
             });
         }
 
