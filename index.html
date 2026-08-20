@@ -372,8 +372,7 @@
             buildTerrain();
             buildRiver();
             buildAtelier();
-            loadRocks();  // GLBを非同期でロード
-            loadTrees(); // GLBを非同期で逐次ロード、ロード完了ごとに追加
+            loadEnvironment(); // 全GLBモデルを非同期ロード
 
             // Load Saved Position or Default
             loadLocalData(false);
@@ -592,92 +591,54 @@
             scene.add(atelierGroup);
         }
 
-        // --- GLB Rock Loading (Quaternius Stylized Nature MegaKit, CC0) ---
-        function loadRocks() {
+        // --- Environment: All Quaternius Stylized Nature MegaKit GLBs (CC0) ---
+        // Config: [encodedPath, count, xMin, xMax, sMin, sMax, rockTilt]
+        // rockTilt=true → small random rx/rz rotation (for rocks/pebbles)
+        function loadEnvironment() {
             const loader = new THREE.GLTFLoader();
 
-            // [path, count, [scaleMin, scaleMax]] — west rock field (X: -950→-200)
-            const ROCK_CONFIGS = [
-                ['models/Rock%20Medium.glb',   150, [0.8, 4.5]],
-                ['models/Pebble%20Round.glb',  120, [0.3, 1.8]],
-                ['models/Pebble%20Square.glb',  80, [0.3, 1.5]],
+            const ENV = [
+                // ── East Forest (X 150→950) ──────────────────────────────────
+                ['models/Tree.glb',                         80, 150, 950, 3.0, 7.0, false],
+                ['models/Pine.glb',                         60, 300, 950, 3.0, 6.0, false],
+                ['models/Twisted%20Tree.glb',               30, 150, 700, 3.0, 7.0, false],
+                ['models/Dead%20Tree.glb',                  20, 150, 950, 3.0, 6.0, false],
+                ['models/Bush.glb',                         60, 150, 950, 1.0, 3.0, false],
+                ['models/Bush%20with%20Flowers.glb',        40, 150, 700, 1.0, 2.5, false],
+                ['models/Fern.glb',                         80, 150, 950, 0.8, 2.0, false],
+                ['models/Plant.glb',                        50, 150, 900, 0.8, 2.0, false],
+                ['models/Plant%20Big.glb',                  30, 150, 800, 1.0, 2.5, false],
+                ['models/Mushroom.glb',                     30, 150, 900, 0.5, 1.5, false],
+                ['models/Mushroom%20Laetiporus.glb',        20, 150, 900, 0.5, 1.5, false],
+
+                // ── West Rock Field (X -950→-200) ────────────────────────────
+                ['models/Rock%20Medium.glb',                80, -950, -200, 0.8, 4.5, true],
+                ['models/Rock%20Path%20Round%20Wide.glb',   25, -950, -200, 1.0, 3.0, true],
+                ['models/Rock%20Path%20Round%20Thin.glb',   25, -950, -200, 1.0, 3.0, true],
+                ['models/Rock%20Path%20Round%20Small.glb',  35, -950, -200, 0.5, 2.0, true],
+                ['models/Rock%20Path%20Square%20Wide.glb',  20, -950, -200, 1.0, 3.0, true],
+                ['models/Rock%20Path%20Square%20Thin.glb',  20, -950, -200, 1.0, 3.0, true],
+                ['models/Rock%20Path%20Square%20Smal.glb',  30, -950, -200, 0.5, 2.0, true],
+                ['models/Pebble%20Round.glb',               70, -950, -200, 0.3, 1.8, true],
+                ['models/Pebble%20Square.glb',              70, -950, -200, 0.3, 1.5, true],
+
+                // ── Center Meadow (X -300→800) ───────────────────────────────
+                ['models/Flower%20Single.glb',              80,  -100, 800, 0.5, 1.5, false],
+                ['models/Flower%20Group.glb',               50,  -100, 700, 0.5, 1.5, false],
+                ['models/Flower%20Petal.glb',               60,  -100, 800, 0.5, 1.5, false],
+                ['models/Clover.glb',                       80,  -300, 500, 0.5, 1.5, false],
+                ['models/Grass.glb',                       100,  -400, 900, 1.0, 2.5, false],
+                ['models/Grass%20Wispy.glb',                80,  -400, 900, 1.0, 2.5, false],
+                ['models/Tall%20Grass.glb',                 80,  -400, 900, 1.0, 2.0, false],
             ];
 
-            ROCK_CONFIGS.forEach(([path, count, [sMin, sMax]]) => {
+            ENV.forEach(([path, count, xMin, xMax, sMin, sMax, rockTilt]) => {
                 loader.load(path, (gltf) => {
                     const root = gltf.scene;
                     root.traverse((node) => {
                         if (node.isMesh) {
                             node.castShadow = true;
                             node.receiveShadow = true;
-                            if (node.material) {
-                                if (Array.isArray(node.material)) {
-                                    node.material.forEach(m => { m.needsUpdate = true; });
-                                } else {
-                                    node.material.needsUpdate = true;
-                                }
-                            }
-                        }
-                    });
-
-                    for (let i = 0; i < count; i++) {
-                        const x  = -200 - Math.random() * (FIELD_WIDTH / 2 - 250);
-                        const z  = (Math.random() - 0.5) * (FIELD_DEPTH - 100);
-                        const h  = getTerrainHeight(x, z);
-                        // Power-law scale: 60% small, 30% medium, 10% large
-                        const roll = Math.random();
-                        const t = roll < 0.6 ? Math.random() * 0.3
-                                : roll < 0.9 ? 0.3 + Math.random() * 0.4
-                                : 0.7 + Math.random() * 0.3;
-                        const s  = sMin + t * (sMax - sMin);
-                        const ry = Math.random() * Math.PI * 2;
-                        const rx = Math.random() * 0.4;
-                        const rz = Math.random() * 0.4;
-
-                        const clone = root.clone();
-                        clone.position.set(x, h, z);
-                        clone.scale.setScalar(s);
-                        clone.rotation.set(rx, ry, rz);
-                        scene.add(clone);
-                    }
-
-                    shadowsReady = false;
-                }, undefined, (err) => {
-                    console.warn('Rock model failed to load:', path, err);
-                });
-            });
-        }
-
-        // --- GLB Tree Loading (Quaternius Stylized Nature MegaKit, CC0) ---
-        function loadTrees() {
-            const loader = new THREE.GLTFLoader();
-            const dummy = new THREE.Object3D();
-
-            // [model path, count, xMin, xMax, scale range [min,max]]
-            // Quaternius Stylized Nature MegaKit (CC0) — spaces encoded as %20 for GitHub Pages
-            const TREE_CONFIGS = [
-                ['models/Tree.glb',             120, 150, 950, [3, 7]],
-                ['models/Pine.glb',              80, 300, 950, [3, 6]],
-                ['models/Twisted%20Tree.glb',    40, 150, 700, [3, 7]],
-                ['models/Dead%20Tree.glb',       30, 150, 950, [3, 6]],
-            ];
-
-            TREE_CONFIGS.forEach(([path, count, xMin, xMax, [sMin, sMax]]) => {
-                loader.load(path, (gltf) => {
-                    const root = gltf.scene;
-
-                    // Enable shadows and correct encoding on every mesh in the model
-                    root.traverse((node) => {
-                        if (node.isMesh) {
-                            node.castShadow = true;
-                            node.receiveShadow = true;
-                            if (node.material) {
-                                if (Array.isArray(node.material)) {
-                                    node.material.forEach(m => { m.needsUpdate = true; });
-                                } else {
-                                    node.material.needsUpdate = true;
-                                }
-                            }
                         }
                     });
 
@@ -686,19 +647,20 @@
                         const z  = (Math.random() - 0.5) * (FIELD_DEPTH - 100);
                         const h  = getTerrainHeight(x, z);
                         const s  = sMin + Math.random() * (sMax - sMin);
-                        const ry = Math.random() * Math.PI * 2;
-
                         const clone = root.clone();
                         clone.position.set(x, h, z);
                         clone.scale.setScalar(s);
-                        clone.rotation.y = ry;
+                        clone.rotation.y = Math.random() * Math.PI * 2;
+                        if (rockTilt) {
+                            clone.rotation.x = (Math.random() - 0.5) * 0.5;
+                            clone.rotation.z = (Math.random() - 0.5) * 0.5;
+                        }
                         scene.add(clone);
                     }
 
-                    // Re-bake shadows to include newly added trees
                     shadowsReady = false;
                 }, undefined, (err) => {
-                    console.warn('Tree model failed to load:', path, err);
+                    console.warn('Model failed to load:', path, err);
                 });
             });
         }
