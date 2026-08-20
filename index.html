@@ -234,6 +234,7 @@
     <!-- Three.js Import -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Sky.js"></script>
 
     <script>
         // --- Localization Texts ---
@@ -297,6 +298,14 @@
 
         let shadowsReady = false;
 
+        // Day/night cycle
+        let ambientLight, sunLight, hemiLight;
+        let sky, skyUniforms, sunVec;
+        let stars;
+        let dayTime = 0.28;           // 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
+        const DAY_CYCLE_SEC = 480;    // 8分で1日
+        let lastShadowElevation = null;
+
         // DOM Elements
         const container = document.getElementById('webgl-container');
         const posDisplay = document.getElementById('lang-pos');
@@ -328,7 +337,6 @@
         function init() {
             // Scene Setup
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);
             scene.fog = new THREE.FogExp2(0xd0e0e8, 0.0012);
 
             // Camera Setup
@@ -348,10 +356,10 @@
             container.appendChild(renderer.domElement);
 
             // Lighting System
-            const ambientLight = new THREE.AmbientLight(0xddeeff, 0.4);
+            ambientLight = new THREE.AmbientLight(0xddeeff, 0.4);
             scene.add(ambientLight);
 
-            const sunLight = new THREE.DirectionalLight(0xfff5ea, 1.2);
+            sunLight = new THREE.DirectionalLight(0xfff5ea, 1.2);
             sunLight.position.set(300, 400, 200);
             sunLight.castShadow = true;
             sunLight.shadow.mapSize.width = 2048;
@@ -365,8 +373,41 @@
             sunLight.shadow.camera.bottom = -d;
             scene.add(sunLight);
 
-            const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x3d5229, 0.4);
+            hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x3d5229, 0.4);
             scene.add(hemiLight);
+
+            // Sky (Three.js physical sky shader)
+            sky = new THREE.Sky();
+            sky.scale.setScalar(450000);
+            scene.add(sky);
+            skyUniforms = sky.material.uniforms;
+            skyUniforms['turbidity'].value = 8;
+            skyUniforms['rayleigh'].value = 2;
+            skyUniforms['mieCoefficient'].value = 0.005;
+            skyUniforms['mieDirectionalG'].value = 0.8;
+            sunVec = new THREE.Vector3();
+
+            // Stars particle system
+            (function buildStars() {
+                const N = 2000;
+                const pos = new Float32Array(N * 3);
+                for (let i = 0; i < N; i++) {
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi   = Math.acos(2 * Math.random() - 1);
+                    const r     = 900;
+                    pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+                    pos[i*3+1] = Math.abs(r * Math.sin(phi) * Math.sin(theta)); // upper hemisphere only
+                    pos[i*3+2] = r * Math.cos(phi);
+                }
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                const mat = new THREE.PointsMaterial({
+                    color: 0xffffff, size: 1.8, sizeAttenuation: false,
+                    transparent: true, opacity: 0
+                });
+                stars = new THREE.Points(geo, mat);
+                scene.add(stars);
+            })();
 
             // World Generation
             buildTerrain();
@@ -665,6 +706,75 @@
             });
         }
 
+        // --- Day/Night Cycle ---
+        const _tmpColor = new THREE.Color();
+        function updateDayCycle(delta) {
+            dayTime = (dayTime + delta / DAY_CYCLE_SEC) % 1.0;
+
+            // Sun elevation: -75° (midnight) → 0° (horizon) → +75° (noon)
+            const elevation = Math.sin((dayTime - 0.25) * Math.PI * 2) * 75;
+
+            // Sky sun position
+            const phi = THREE.MathUtils.degToRad(90 - elevation);
+            sunVec.setFromSphericalCoords(1, phi, 0);
+            skyUniforms['sunPosition'].value.copy(sunVec);
+            // More atmosphere scatter near horizon
+            const horizonNear = Math.max(0, 1 - Math.abs(elevation) / 20);
+            skyUniforms['turbidity'].value = 8 + horizonNear * 8;
+            skyUniforms['rayleigh'].value  = 2 + horizonNear * 3;
+
+            // dayFactor 0..1 (0=horizon/night, 1=noon)
+            const dayFactor   = Math.max(0, Math.min(1, elevation / 75));
+            // nightFactor 0..1 (1=full night)
+            const nightFactor = Math.max(0, Math.min(1, -elevation / 40));
+            // near-horizon warmth factor (dawn/dusk glow)
+            const horizonFactor = Math.max(0, 1 - Math.abs(elevation) / 15) * (elevation > -15 ? 1 : 0);
+
+            // Ambient light
+            _tmpColor.setHex(0x050810);
+            ambientLight.color.copy(
+                _tmpColor.lerp(_tmpColor.clone().setHex(0x4a2818), horizonFactor)
+                         .lerp(new THREE.Color(0xddeeff), dayFactor)
+            );
+            ambientLight.intensity = 0.05 + horizonFactor * 0.1 + dayFactor * 0.35;
+
+            // Sun (directional) light — tracks sky sun
+            sunLight.position.copy(sunVec).multiplyScalar(400);
+            if (elevation > -5) {
+                const sunFactor = Math.max(0, (elevation + 5) / 80);
+                sunLight.color.setHex(0xff6010).lerp(new THREE.Color(0xfff8e8), dayFactor);
+                sunLight.intensity = sunFactor * 1.2;
+            } else {
+                sunLight.intensity = 0;
+            }
+
+            // Hemisphere light
+            hemiLight.color.setHex(0x050a15)
+                .lerp(new THREE.Color(0xffa060), horizonFactor)
+                .lerp(new THREE.Color(0x87ceeb), dayFactor);
+            hemiLight.groundColor.setHex(0x080808)
+                .lerp(new THREE.Color(0x3d4020), horizonFactor)
+                .lerp(new THREE.Color(0x3d5229), dayFactor);
+            hemiLight.intensity = 0.05 + horizonFactor * 0.15 + dayFactor * 0.35;
+
+            // Fog color
+            scene.fog.color.setHex(0x020408)
+                .lerp(new THREE.Color(0xff9060), horizonFactor)
+                .lerp(new THREE.Color(0xd0e0e8), dayFactor);
+
+            // Tone mapping exposure (brighter at noon, dim at night)
+            renderer.toneMappingExposure = 0.15 + horizonFactor * 0.3 + dayFactor * 0.7;
+
+            // Stars fade in at night
+            stars.material.opacity = Math.max(0, Math.min(1, nightFactor * 2));
+
+            // Re-bake shadows when sun elevation changes by >8°
+            if (lastShadowElevation === null || Math.abs(elevation - lastShadowElevation) > 8) {
+                shadowsReady = false;
+                lastShadowElevation = elevation;
+            }
+        }
+
         // --- Controls & Input Handling ---
         function setupControls() {
             // Keyboard Handlers
@@ -939,7 +1049,10 @@
             // HUD Update
             posDisplay.innerText = `POS: X: ${camera.position.x.toFixed(1)}, Z: ${camera.position.z.toFixed(1)}`;
 
-            // Bake shadow maps on first frame only (scene is fully static)
+            // Day/night cycle update
+            updateDayCycle(delta);
+
+            // Re-bake shadows when flagged (sun moved or new objects loaded)
             if (!shadowsReady) {
                 renderer.shadowMap.needsUpdate = true;
                 shadowsReady = true;
