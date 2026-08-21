@@ -1291,6 +1291,7 @@
 
             try {
                 const exporter = new THREE.GLTFExporter();
+                // r128: parse(input, onDone, options) — 3 args, no onError
                 exporter.parse(terrainGroup, (glb) => {
                     const blob = new Blob([glb], { type: 'application/octet-stream' });
                     const url = URL.createObjectURL(blob);
@@ -1301,10 +1302,6 @@
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
-                    btn.textContent = '地形をBlender用に出力 (Export Terrain .glb)';
-                    btn.disabled = false;
-                }, (err) => {
-                    alert('エクスポートエラー: ' + err);
                     btn.textContent = '地形をBlender用に出力 (Export Terrain .glb)';
                     btn.disabled = false;
                 }, { binary: true });
