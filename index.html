@@ -211,13 +211,6 @@
             Shift : Run
         </div>
 
-        <button id="export-btn" onclick="exportTerrainGLB()" style="
-            position:absolute; top:12px; right:12px; z-index:100;
-            background:rgba(0,0,0,0.55); color:#fff; border:1px solid #888;
-            border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;">
-            ⬇ Export Terrain (.glb)
-        </button>
-
         <div id="touch-controls">
             <div class="joystick-zone" id="joystick">
                 <div class="joystick-knob" id="knob"></div>
@@ -233,6 +226,7 @@
             <button class="modal-btn" id="btn-load">ロード (Load)</button>
             <button class="modal-btn" id="btn-export">エクスポート (Export)</button>
             <button class="modal-btn" id="btn-import-trigger">インポート (Import)</button>
+            <button class="modal-btn" id="btn-export-terrain" onclick="exportTerrainGLB()">地形をBlender用に出力 (Export Terrain .glb)</button>
             <button class="modal-btn" id="btn-close" style="background: #5a2a2a;">閉じる (Close)</button>
         </div>
         <input type="file" id="file-input" accept=".json">
