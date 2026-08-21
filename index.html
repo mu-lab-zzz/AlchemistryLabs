@@ -226,7 +226,7 @@
             <button class="modal-btn" id="btn-load">ロード (Load)</button>
             <button class="modal-btn" id="btn-export">エクスポート (Export)</button>
             <button class="modal-btn" id="btn-import-trigger">インポート (Import)</button>
-            <button class="modal-btn" id="btn-export-terrain" onclick="exportTerrainGLB()">地形をBlender用に出力 (Export Terrain .glb)</button>
+            <button class="modal-btn" id="btn-export-terrain">地形をBlender用に出力 (Export Terrain .glb)</button>
             <button class="modal-btn" id="btn-close" style="background: #5a2a2a;">閉じる (Close)</button>
         </div>
         <input type="file" id="file-input" accept=".json">
@@ -1017,6 +1017,7 @@
             document.getElementById('btn-export').addEventListener('click', exportData);
             document.getElementById('btn-import-trigger').addEventListener('click', () => document.getElementById('file-input').click());
             document.getElementById('file-input').addEventListener('change', importData);
+            document.getElementById('btn-export-terrain').addEventListener('click', exportTerrainGLB);
         }
 
         function setupTouchEvents() {
@@ -1281,23 +1282,37 @@
 
         // --- Terrain GLB Export for Blender ---
         function exportTerrainGLB() {
-            if (!terrainGroup) { alert('Terrain not ready.'); return; }
-            const btn = document.getElementById('export-btn');
-            btn.textContent = '⏳ Exporting...';
+            if (!terrainGroup) { alert('地形がまだ生成されていません。'); return; }
+            if (!THREE.GLTFExporter) { alert('GLTFExporter が読み込まれていません。'); return; }
+
+            const btn = document.getElementById('btn-export-terrain');
+            btn.textContent = '⏳ エクスポート中...';
             btn.disabled = true;
 
-            const exporter = new THREE.GLTFExporter();
-            exporter.parse(terrainGroup, (glb) => {
-                const blob = new Blob([glb], { type: 'application/octet-stream' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'terrain.glb';
-                a.click();
-                URL.revokeObjectURL(url);
-                btn.textContent = '⬇ Export Terrain (.glb)';
+            try {
+                const exporter = new THREE.GLTFExporter();
+                exporter.parse(terrainGroup, (glb) => {
+                    const blob = new Blob([glb], { type: 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'terrain.glb';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    btn.textContent = '地形をBlender用に出力 (Export Terrain .glb)';
+                    btn.disabled = false;
+                }, (err) => {
+                    alert('エクスポートエラー: ' + err);
+                    btn.textContent = '地形をBlender用に出力 (Export Terrain .glb)';
+                    btn.disabled = false;
+                }, { binary: true });
+            } catch (e) {
+                alert('エラー: ' + e.message);
+                btn.textContent = '地形をBlender用に出力 (Export Terrain .glb)';
                 btn.disabled = false;
-            }, { binary: true });
+            }
         }
     </script>
 </body>
