@@ -211,6 +211,13 @@
             Shift : Run
         </div>
 
+        <button id="export-btn" onclick="exportTerrainGLB()" style="
+            position:absolute; top:12px; right:12px; z-index:100;
+            background:rgba(0,0,0,0.55); color:#fff; border:1px solid #888;
+            border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;">
+            ⬇ Export Terrain (.glb)
+        </button>
+
         <div id="touch-controls">
             <div class="joystick-zone" id="joystick">
                 <div class="joystick-knob" id="knob"></div>
@@ -235,6 +242,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Sky.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
 
     <script>
         // --- Localization Texts ---
@@ -307,6 +315,7 @@
         let envTime = 0;
         let riverMesh = null;
         let riverBaseY = null;
+        let terrainGroup = null;
         let dayTime = 0.28;           // 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
         const DAY_CYCLE_SEC = 480;    // 8分で1日
         let lastShadowElevation = null;
@@ -473,6 +482,8 @@
         }
 
         function buildTerrain() {
+            terrainGroup = new THREE.Group();
+            terrainGroup.name = 'Terrain';
             // Split into 10×5 chunks — Three.js frustum-culls each independently.
             // Same vertex density (120/10=12 segs X, 80/5=16 segs Z) → identical look.
             const CHUNKS_X = 10, CHUNKS_Z = 5;
@@ -536,9 +547,10 @@
                     const chunk = new THREE.Mesh(geo, sharedMat);
                     chunk.position.set(worldCX, 0, worldCZ);
                     chunk.receiveShadow = true;
-                    scene.add(chunk);
+                    terrainGroup.add(chunk);
                 }
             }
+            scene.add(terrainGroup);
         }
 
         function buildRiver() {
@@ -1272,6 +1284,27 @@
 
         // Initialize Application on DOM Ready
         window.addEventListener('DOMContentLoaded', init);
+
+        // --- Terrain GLB Export for Blender ---
+        function exportTerrainGLB() {
+            if (!terrainGroup) { alert('Terrain not ready.'); return; }
+            const btn = document.getElementById('export-btn');
+            btn.textContent = '⏳ Exporting...';
+            btn.disabled = true;
+
+            const exporter = new THREE.GLTFExporter();
+            exporter.parse(terrainGroup, (glb) => {
+                const blob = new Blob([glb], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'terrain.glb';
+                a.click();
+                URL.revokeObjectURL(url);
+                btn.textContent = '⬇ Export Terrain (.glb)';
+                btn.disabled = false;
+            }, { binary: true });
+        }
     </script>
 </body>
 </html>
