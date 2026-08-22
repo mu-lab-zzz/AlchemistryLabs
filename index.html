@@ -47,11 +47,12 @@
             text-shadow: 0 2px 4px rgba(0,0,0,0.8);
         }
         
-        .location-info h1 {
-            font-size: 1.2rem;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            color: #e0d0b0;
+        #fps-display {
+            font-size: 0.72rem;
+            font-family: monospace;
+            color: #aaffaa;
+            opacity: 0.85;
+            letter-spacing: 1px;
         }
         .location-info p {
             font-size: 0.8rem;
@@ -195,7 +196,7 @@
     <div id="ui-layer">
         <div class="hud-header">
             <div class="location-info">
-                <h1 id="lang-title">錬金術師の領域</h1>
+                <p id="fps-display">FPS: --</p>
                 <p id="lang-pos">POS: X: 0.0, Z: 0.0</p>
             </div>
             <div>
@@ -310,6 +311,7 @@
         let riverMesh = null;
         let riverBaseY = null;
         let terrainGroup = null;
+        let fpsFrameCount = 0, fpsLastTime = 0;
         let dayTime = 0.28;           // 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
         const DAY_CYCLE_SEC = 480;    // 8分で1日
         let lastShadowElevation = null;
@@ -1109,7 +1111,6 @@
             currentLang = currentLang === 'jp' ? 'en' : 'jp';
             const t = TRANSLATIONS[currentLang];
 
-            document.getElementById('lang-title').innerText = t.title;
             document.getElementById('lang-guide').innerHTML = t.guide;
             document.getElementById('lang-menu-title').innerText = t.menuTitle;
             document.getElementById('btn-save').innerText = t.saveBtn;
@@ -1248,6 +1249,13 @@
 
             // HUD Update
             posDisplay.innerText = `POS: X: ${camera.position.x.toFixed(1)}, Z: ${camera.position.z.toFixed(1)}`;
+            fpsFrameCount++;
+            if (time - fpsLastTime >= 500) {
+                const fps = Math.round(fpsFrameCount * 1000 / (time - fpsLastTime));
+                document.getElementById('fps-display').textContent = `FPS: ${fps}`;
+                fpsFrameCount = 0;
+                fpsLastTime = time;
+            }
 
             // Day/night cycle update
             updateDayCycle(delta);
