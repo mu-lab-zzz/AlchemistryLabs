@@ -1326,8 +1326,8 @@
             // Compass
             drawCompass();
 
-            // Day/night cycle update
-            updateDayCycle(delta);
+            // Day/night cycle update (paused in map mode)
+            if (!mapMode) updateDayCycle(delta);
 
             // Animate water waves
             if (riverMesh && riverBaseY) {
@@ -1359,23 +1359,31 @@
 
         // --- World Map (bird's-eye camera) ---
         let mapMode = false;
-        const savedCam = { pos: null, rotX: 0, rotY: 0, rotZ: 0 };
+        const savedCam = { pos: null, rotX: 0, rotY: 0, rotZ: 0, dayTime: 0 };
 
         function toggleMap() {
             const overlay = document.getElementById('map-overlay');
             if (mapMode) {
-                // Restore player camera
+                // Restore player camera and environment
                 mapMode = false;
                 overlay.style.display = 'none';
                 camera.position.copy(savedCam.pos);
                 camera.rotation.set(savedCam.rotX, savedCam.rotY, savedCam.rotZ);
                 velocity.set(0, 0, 0);
+                // Restore saved time and show clouds
+                dayTime = savedCam.dayTime;
+                cloudSprites.forEach(sp => { sp.visible = true; });
             } else {
-                // Save current camera state
+                // Save current camera state and time
                 savedCam.pos = camera.position.clone();
                 savedCam.rotX = camera.rotation.x;
                 savedCam.rotY = camera.rotation.y;
                 savedCam.rotZ = camera.rotation.z;
+                savedCam.dayTime = dayTime;
+                // Force midday and hide clouds
+                dayTime = 0.5;
+                updateDayCycle(0); // apply immediately (delta=0, no time advance)
+                cloudSprites.forEach(sp => { sp.visible = false; });
                 // Fly to bird's-eye view: center of world, looking straight down
                 mapMode = true;
                 overlay.style.display = 'block';
