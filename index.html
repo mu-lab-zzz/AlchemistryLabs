@@ -1402,9 +1402,14 @@
                 camera.position.copy(savedCam.pos);
                 camera.rotation.set(savedCam.rotX, savedCam.rotY, savedCam.rotZ);
                 velocity.set(0, 0, 0);
-                // Restore saved time and show clouds, hide marker
+                // Restore saved time, show sky elements, hide marker
                 dayTime = savedCam.dayTime;
+                if (sky) sky.visible = true;
+                if (sunSprite) sunSprite.visible = true;
+                if (moonSprite) moonSprite.visible = true;
+                if (stars) stars.visible = true;
                 cloudSprites.forEach(sp => { sp.visible = true; });
+                scene.background = null;
                 if (playerMarker) playerMarker.visible = false;
             } else {
                 // Save current camera state and time
@@ -1417,6 +1422,13 @@
                 dayTime = 0.5;
                 updateDayCycle(0); // apply immediately (delta=0, no time advance)
                 cloudSprites.forEach(sp => { sp.visible = false; });
+                // Hide sky elements to avoid washed-out atmosphere
+                if (sky) sky.visible = false;
+                if (sunSprite) sunSprite.visible = false;
+                if (moonSprite) moonSprite.visible = false;
+                if (stars) stars.visible = false;
+                cloudSprites.forEach(sp => { sp.visible = false; });
+                scene.background = new THREE.Color(0x0a0e12);
                 // Place player marker at saved position
                 if (playerMarker) {
                     const mh = getTerrainHeight(savedCam.pos.x, savedCam.pos.z);
@@ -1426,7 +1438,7 @@
                 // Fly to bird's-eye view: center of world, looking straight down
                 mapMode = true;
                 overlay.style.display = 'block';
-                camera.position.set(0, 820, 0);
+                camera.position.set(0, 1640, 0);
                 camera.rotation.set(-Math.PI / 2, 0, 0);
                 velocity.set(0, 0, 0);
             }
