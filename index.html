@@ -351,6 +351,7 @@
         let stars;
         let sunSprite, moonSprite;
         const cloudSprites = [];
+        let playerMarker = null;
         let envTime = 0;
         let riverMesh = null;
         let riverBaseY = null;
@@ -908,6 +909,26 @@
                 cloudSprites.push(sp);
                 scene.add(sp);
             }
+
+            // Player position marker (used in map mode)
+            const markerCv = document.createElement('canvas');
+            markerCv.width = markerCv.height = 128;
+            const mCtx = markerCv.getContext('2d');
+            const g = mCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            g.addColorStop(0.0, 'rgba(255,255,180,1.0)');
+            g.addColorStop(0.2, 'rgba(255,220, 60,0.9)');
+            g.addColorStop(0.5, 'rgba(255,140,  0,0.5)');
+            g.addColorStop(1.0, 'rgba(255, 80,  0,0.0)');
+            mCtx.fillStyle = g;
+            mCtx.fillRect(0, 0, 128, 128);
+            playerMarker = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: new THREE.CanvasTexture(markerCv),
+                transparent: true, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            }));
+            playerMarker.scale.set(50, 50, 1);
+            playerMarker.visible = false;
+            scene.add(playerMarker);
         }
 
         // --- Day/Night Cycle ---
@@ -1317,6 +1338,11 @@
             // Map mode: enforce north-up straight-down orientation every frame
             if (mapMode) {
                 camera.rotation.set(-Math.PI / 2, 0, 0);
+                // Pulse player marker scale
+                if (playerMarker && playerMarker.visible) {
+                    const pulse = 1.0 + 0.35 * Math.sin(time * 0.004);
+                    playerMarker.scale.set(50 * pulse, 50 * pulse, 1);
+                }
             }
 
             // HUD Update
@@ -1376,9 +1402,10 @@
                 camera.position.copy(savedCam.pos);
                 camera.rotation.set(savedCam.rotX, savedCam.rotY, savedCam.rotZ);
                 velocity.set(0, 0, 0);
-                // Restore saved time and show clouds
+                // Restore saved time and show clouds, hide marker
                 dayTime = savedCam.dayTime;
                 cloudSprites.forEach(sp => { sp.visible = true; });
+                if (playerMarker) playerMarker.visible = false;
             } else {
                 // Save current camera state and time
                 savedCam.pos = camera.position.clone();
@@ -1390,6 +1417,12 @@
                 dayTime = 0.5;
                 updateDayCycle(0); // apply immediately (delta=0, no time advance)
                 cloudSprites.forEach(sp => { sp.visible = false; });
+                // Place player marker at saved position
+                if (playerMarker) {
+                    const mh = getTerrainHeight(savedCam.pos.x, savedCam.pos.z);
+                    playerMarker.position.set(savedCam.pos.x, mh + 2, savedCam.pos.z);
+                    playerMarker.visible = true;
+                }
                 // Fly to bird's-eye view: center of world, looking straight down
                 mapMode = true;
                 overlay.style.display = 'block';
