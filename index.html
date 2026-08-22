@@ -1402,13 +1402,14 @@
                 camera.position.copy(savedCam.pos);
                 camera.rotation.set(savedCam.rotX, savedCam.rotY, savedCam.rotZ);
                 velocity.set(0, 0, 0);
-                // Restore saved time, show sky elements, hide marker
+                // Restore time, sky, clouds; hide marker
                 dayTime = savedCam.dayTime;
-                if (sky) sky.visible = true;
+                if (sky) scene.add(sky);
                 if (sunSprite) sunSprite.visible = true;
                 if (moonSprite) moonSprite.visible = true;
                 if (stars) stars.visible = true;
                 cloudSprites.forEach(sp => { sp.visible = true; });
+                renderer.setClearColor(0x000000, 0);
                 scene.background = null;
                 if (playerMarker) playerMarker.visible = false;
             } else {
@@ -1418,17 +1419,16 @@
                 savedCam.rotY = camera.rotation.y;
                 savedCam.rotZ = camera.rotation.z;
                 savedCam.dayTime = dayTime;
-                // Force midday and hide clouds
-                dayTime = 0.5;
-                updateDayCycle(0); // apply immediately (delta=0, no time advance)
-                cloudSprites.forEach(sp => { sp.visible = false; });
-                // Hide sky elements to avoid washed-out atmosphere
-                if (sky) sky.visible = false;
+                // Remove sky mesh entirely — sky.visible=false is insufficient for the shader
+                if (sky) scene.remove(sky);
                 if (sunSprite) sunSprite.visible = false;
                 if (moonSprite) moonSprite.visible = false;
                 if (stars) stars.visible = false;
                 cloudSprites.forEach(sp => { sp.visible = false; });
-                scene.background = new THREE.Color(0x0a0e12);
+                // Dark background so terrain reads clearly from above
+                const mapBg = new THREE.Color(0x0d1117);
+                scene.background = mapBg;
+                renderer.setClearColor(mapBg, 1);
                 // Place player marker at saved position
                 if (playerMarker) {
                     const mh = getTerrainHeight(savedCam.pos.x, savedCam.pos.z);
