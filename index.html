@@ -1046,6 +1046,7 @@
             });
 
             document.addEventListener('mousemove', (e) => {
+                if (mapMode) return;
                 if (document.pointerLockElement === renderer.domElement) {
                     camera.rotation.y -= e.movementX * 0.002;
                     camera.rotation.x -= e.movementY * 0.002;
@@ -1119,7 +1120,7 @@
                         moveJoystick.dist = dist;
                     }
 
-                    if (touch.identifier === touchIdLook) {
+                    if (touch.identifier === touchIdLook && !mapMode) {
                         const dx = touch.clientX - lastTouchLookPos.x;
                         const dy = touch.clientY - lastTouchLookPos.y;
 
@@ -1312,6 +1313,11 @@
                 }
             }
             } // end !mapMode
+
+            // Map mode: enforce north-up straight-down orientation every frame
+            if (mapMode) {
+                camera.rotation.set(-Math.PI / 2, 0, 0);
+            }
 
             // HUD Update
             posDisplay.innerText = `POS: X: ${camera.position.x.toFixed(1)}, Z: ${camera.position.z.toFixed(1)}`;
