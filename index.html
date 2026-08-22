@@ -312,6 +312,7 @@
         let riverBaseY = null;
         let terrainGroup = null;
         let fpsFrameCount = 0, fpsLastTime = 0;
+        const colliders = []; // {x, z, r} — 木・岩の衝突円
         let dayTime = 0.28;           // 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
         const DAY_CYCLE_SEC = 480;    // 8分で1日
         let lastShadowElevation = null;
@@ -679,47 +680,47 @@
         }
 
         // --- Environment: All Quaternius Stylized Nature MegaKit GLBs (CC0) ---
-        // Config: [encodedPath, count, xMin, xMax, sMin, sMax, rockTilt]
-        // rockTilt=true → small random rx/rz rotation (for rocks/pebbles)
+        // Config: [encodedPath, count, xMin, xMax, sMin, sMax, rockTilt, collR]
+        // collR = base collision radius (model units). 0 = walk-through.
         function loadEnvironment() {
             const loader = new THREE.GLTFLoader();
 
             const ENV = [
                 // ── East Forest (X 150→950) ──────────────────────────────────
-                ['models/Tree.glb',                         80, 150, 950, 3.0, 7.0, false],
-                ['models/Pine.glb',                         60, 300, 950, 3.0, 6.0, false],
-                ['models/Twisted%20Tree.glb',               30, 150, 700, 3.0, 7.0, false],
-                ['models/Dead%20Tree.glb',                  20, 150, 950, 3.0, 6.0, false],
-                ['models/Bush.glb',                         60, 150, 950, 1.0, 3.0, false],
-                ['models/Bush%20with%20Flowers.glb',        40, 150, 700, 1.0, 2.5, false],
-                ['models/Fern.glb',                         80, 150, 950, 0.8, 2.0, false],
-                ['models/Plant.glb',                        50, 150, 900, 0.8, 2.0, false],
-                ['models/Plant%20Big.glb',                  30, 150, 800, 1.0, 2.5, false],
-                ['models/Mushroom.glb',                     30, 150, 900, 0.5, 1.5, false],
-                ['models/Mushroom%20Laetiporus.glb',        20, 150, 900, 0.5, 1.5, false],
+                ['models/Tree.glb',                         80, 150, 950, 3.0, 7.0, false, 0.9],
+                ['models/Pine.glb',                         60, 300, 950, 3.0, 6.0, false, 0.7],
+                ['models/Twisted%20Tree.glb',               30, 150, 700, 3.0, 7.0, false, 0.8],
+                ['models/Dead%20Tree.glb',                  20, 150, 950, 3.0, 6.0, false, 0.6],
+                ['models/Bush.glb',                         60, 150, 950, 1.0, 3.0, false, 0],
+                ['models/Bush%20with%20Flowers.glb',        40, 150, 700, 1.0, 2.5, false, 0],
+                ['models/Fern.glb',                         80, 150, 950, 0.8, 2.0, false, 0],
+                ['models/Plant.glb',                        50, 150, 900, 0.8, 2.0, false, 0],
+                ['models/Plant%20Big.glb',                  30, 150, 800, 1.0, 2.5, false, 0],
+                ['models/Mushroom.glb',                     30, 150, 900, 0.5, 1.5, false, 0],
+                ['models/Mushroom%20Laetiporus.glb',        20, 150, 900, 0.5, 1.5, false, 0],
 
                 // ── West Rock Field (X -950→-200) ────────────────────────────
-                ['models/Rock%20Medium.glb',                80, -950, -200, 0.8, 4.5, true],
-                ['models/Rock%20Path%20Round%20Wide.glb',   25, -950, -200, 1.0, 3.0, true],
-                ['models/Rock%20Path%20Round%20Thin.glb',   25, -950, -200, 1.0, 3.0, true],
-                ['models/Rock%20Path%20Round%20Small.glb',  35, -950, -200, 0.5, 2.0, true],
-                ['models/Rock%20Path%20Square%20Wide.glb',  20, -950, -200, 1.0, 3.0, true],
-                ['models/Rock%20Path%20Square%20Thin.glb',  20, -950, -200, 1.0, 3.0, true],
-                ['models/Rock%20Path%20Square%20Smal.glb',  30, -950, -200, 0.5, 2.0, true],
-                ['models/Pebble%20Round.glb',               70, -950, -200, 0.3, 1.8, true],
-                ['models/Pebble%20Square.glb',              70, -950, -200, 0.3, 1.5, true],
+                ['models/Rock%20Medium.glb',                80, -950, -200, 0.8, 4.5, true,  1.1],
+                ['models/Rock%20Path%20Round%20Wide.glb',   25, -950, -200, 1.0, 3.0, true,  0.9],
+                ['models/Rock%20Path%20Round%20Thin.glb',   25, -950, -200, 1.0, 3.0, true,  0.8],
+                ['models/Rock%20Path%20Round%20Small.glb',  35, -950, -200, 0.5, 2.0, true,  0],
+                ['models/Rock%20Path%20Square%20Wide.glb',  20, -950, -200, 1.0, 3.0, true,  0.9],
+                ['models/Rock%20Path%20Square%20Thin.glb',  20, -950, -200, 1.0, 3.0, true,  0.8],
+                ['models/Rock%20Path%20Square%20Smal.glb',  30, -950, -200, 0.5, 2.0, true,  0],
+                ['models/Pebble%20Round.glb',               70, -950, -200, 0.3, 1.8, true,  0],
+                ['models/Pebble%20Square.glb',              70, -950, -200, 0.3, 1.5, true,  0],
 
                 // ── Center Meadow (X -300→800) ───────────────────────────────
-                ['models/Flower%20Single.glb',              80,  -100, 800, 0.5, 1.5, false],
-                ['models/Flower%20Group.glb',               50,  -100, 700, 0.5, 1.5, false],
-                ['models/Flower%20Petal.glb',               60,  -100, 800, 0.5, 1.5, false],
-                ['models/Clover.glb',                       80,  -300, 500, 0.5, 1.5, false],
-                ['models/Grass.glb',                       100,  -400, 900, 1.0, 2.5, false],
-                ['models/Grass%20Wispy.glb',                80,  -400, 900, 1.0, 2.5, false],
-                ['models/Tall%20Grass.glb',                 80,  -400, 900, 1.0, 2.0, false],
+                ['models/Flower%20Single.glb',              80,  -100, 800, 0.5, 1.5, false, 0],
+                ['models/Flower%20Group.glb',               50,  -100, 700, 0.5, 1.5, false, 0],
+                ['models/Flower%20Petal.glb',               60,  -100, 800, 0.5, 1.5, false, 0],
+                ['models/Clover.glb',                       80,  -300, 500, 0.5, 1.5, false, 0],
+                ['models/Grass.glb',                       100,  -400, 900, 1.0, 2.5, false, 0],
+                ['models/Grass%20Wispy.glb',                80,  -400, 900, 1.0, 2.5, false, 0],
+                ['models/Tall%20Grass.glb',                 80,  -400, 900, 1.0, 2.0, false, 0],
             ];
 
-            ENV.forEach(([path, count, xMin, xMax, sMin, sMax, rockTilt]) => {
+            ENV.forEach(([path, count, xMin, xMax, sMin, sMax, rockTilt, collR]) => {
                 loader.load(path, (gltf) => {
                     const root = gltf.scene;
                     root.traverse((node) => {
@@ -743,6 +744,7 @@
                             clone.rotation.z = (Math.random() - 0.5) * 0.5;
                         }
                         scene.add(clone);
+                        if (collR > 0) colliders.push({ x, z, r: collR * s });
                     }
 
                     shadowsReady = false;
@@ -1246,6 +1248,22 @@
             // Terrain Height Lock (1.8m eye level)
             const terrainH = getTerrainHeight(camera.position.x, camera.position.z);
             camera.position.y = terrainH + PLAYER_HEIGHT;
+
+            // Collision resolution (trees & rocks)
+            const PLAYER_R = 0.6;
+            const px = camera.position.x, pz = camera.position.z;
+            for (let i = 0; i < colliders.length; i++) {
+                const c = colliders[i];
+                const dx = px - c.x, dz = pz - c.z;
+                const distSq = dx * dx + dz * dz;
+                const minDist = c.r + PLAYER_R;
+                if (distSq < minDist * minDist && distSq > 0.0001) {
+                    const dist = Math.sqrt(distSq);
+                    const push = (minDist - dist) / dist;
+                    camera.position.x += dx * push;
+                    camera.position.z += dz * push;
+                }
+            }
 
             // HUD Update
             posDisplay.innerText = `POS: X: ${camera.position.x.toFixed(1)}, Z: ${camera.position.z.toFixed(1)}`;
