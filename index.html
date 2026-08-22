@@ -168,6 +168,16 @@
             display: none;
         }
 
+        /* Compass Bar */
+        #compass {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none;
+            image-rendering: pixelated;
+        }
+
         /* Reticle */
         #crosshair {
             position: absolute;
@@ -192,6 +202,7 @@
 
     <div id="webgl-container"></div>
     <div id="crosshair"></div>
+    <canvas id="compass" width="320" height="50"></canvas>
 
     <div id="ui-layer">
         <div class="hud-header">
@@ -1275,6 +1286,9 @@
                 fpsLastTime = time;
             }
 
+            // Compass
+            drawCompass();
+
             // Day/night cycle update
             updateDayCycle(delta);
 
@@ -1305,6 +1319,77 @@
 
         // Initialize Application on DOM Ready
         window.addEventListener('DOMContentLoaded', init);
+
+        // --- Compass Bar ---
+        const _compassCanvas = document.getElementById('compass');
+        const _compassCtx = _compassCanvas.getContext('2d');
+        const COMPASS_W = 320, COMPASS_H = 50, VISIBLE_DEG = 120;
+
+        function drawCompass() {
+            const ctx = _compassCtx;
+            ctx.clearRect(0, 0, COMPASS_W, COMPASS_H);
+
+            // Background pill
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, COMPASS_W, COMPASS_H, 10);
+            ctx.fill();
+
+            // Center line
+            const cx = COMPASS_W / 2;
+            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(cx, 2); ctx.lineTo(cx, 10); ctx.stroke();
+
+            // bearing: 0=N,90=E,180=S,270=W
+            const bearing = ((camera.rotation.y * 180 / Math.PI) + 180 + 360) % 360;
+            const pxPerDeg = COMPASS_W / VISIBLE_DEG;
+
+            // Minor ticks every 15°
+            for (let a = 0; a < 360; a += 15) {
+                if (a % 45 === 0) continue;
+                const off = ((a - bearing + 180 + 360) % 360) - 180;
+                const x = cx + off * pxPerDeg;
+                if (x < 0 || x > COMPASS_W) continue;
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(x, 11); ctx.lineTo(x, 17); ctx.stroke();
+            }
+
+            // Cardinal & intercardinal labels
+            const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+            dirs.forEach((label, i) => {
+                const off = ((i * 45 - bearing + 180 + 360) % 360) - 180;
+                const x = cx + off * pxPerDeg;
+                if (x < -20 || x > COMPASS_W + 20) return;
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(x, 8); ctx.lineTo(x, 18); ctx.stroke();
+                const isMain = label.length === 1;
+                ctx.fillStyle = isMain ? '#ffdd55' : 'rgba(255,255,255,0.85)';
+                ctx.font = `bold ${isMain ? 14 : 11}px monospace`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, x, 30);
+            });
+
+            // Home icon (atelier at world 0,0)
+            const hdx = -camera.position.x;
+            const hdz = -camera.position.z;
+            const homeAngle = (Math.atan2(hdx, hdz) * 180 / Math.PI + 360) % 360;
+            const homeOff = ((homeAngle - bearing + 180 + 360) % 360) - 180;
+            const homeX = cx + homeOff * pxPerDeg;
+
+            ctx.font = '14px serif';
+            ctx.textBaseline = 'middle';
+            if (homeX >= 8 && homeX <= COMPASS_W - 8) {
+                ctx.fillText('🏠', homeX, 43);
+            } else {
+                // Arrow at edge pointing toward home
+                const edgeX = homeX < 0 ? 14 : COMPASS_W - 14;
+                ctx.fillText(homeX < 0 ? '◀🏠' : '🏠▶', edgeX, 43);
+            }
+        }
 
         // --- Terrain GLB Export for Blender ---
         function exportTerrainGLB() {
