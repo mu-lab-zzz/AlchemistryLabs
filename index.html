@@ -119,6 +119,41 @@
             color: #fff;
         }
 
+        #map-modal {
+            display: none;
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10,14,20,0.95);
+            border: 1px solid #a08050;
+            border-radius: 12px;
+            padding: 16px;
+            z-index: 200;
+            pointer-events: auto;
+            text-align: center;
+        }
+        #map-modal h3 {
+            color: #e0d0b0;
+            font-size: 0.9rem;
+            margin: 0 0 10px;
+            letter-spacing: 2px;
+        }
+        #map-canvas {
+            display: block;
+            border-radius: 6px;
+            border: 1px solid #555;
+        }
+        #map-close-btn {
+            margin-top: 10px;
+            background: #3a2a1a;
+            color: #e0d0b0;
+            border: 1px solid #a08050;
+            border-radius: 4px;
+            padding: 6px 20px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
         #menu-modal {
             position: absolute;
             top: 50%;
@@ -211,6 +246,7 @@
             </div>
             <div>
                 <button class="system-btn" id="btn-lang">JP / EN</button>
+                <button class="system-btn" id="btn-map">MAP</button>
                 <button class="system-btn" id="btn-menu">MENU</button>
             </div>
         </div>
@@ -241,6 +277,14 @@
             <button class="modal-btn" id="btn-close" style="background: #5a2a2a;">閉じる (Close)</button>
         </div>
         <input type="file" id="file-input" accept=".json">
+    </div>
+
+    <!-- Map Modal -->
+    <div id="map-modal">
+        <h3>── WORLD MAP ──</h3>
+        <canvas id="map-canvas" width="400" height="220"></canvas>
+        <br>
+        <button id="map-close-btn">閉じる (Close)</button>
     </div>
 
     <!-- Three.js Import -->
@@ -1024,6 +1068,8 @@
 
             // UI Button Bindings
             document.getElementById('btn-lang').addEventListener('click', toggleLanguage);
+            document.getElementById('btn-map').addEventListener('click', toggleMap);
+            document.getElementById('map-close-btn').addEventListener('click', toggleMap);
             document.getElementById('btn-menu').addEventListener('click', toggleMenu);
             document.getElementById('btn-close').addEventListener('click', toggleMenu);
             document.getElementById('btn-save').addEventListener('click', () => saveLocalData(true));
@@ -1318,6 +1364,116 @@
 
         // Initialize Application on DOM Ready
         window.addEventListener('DOMContentLoaded', init);
+
+        // --- World Map ---
+        let mapInterval = null;
+
+        function worldToMap(wx, wz) {
+            const MW = 400, MH = 220;
+            return {
+                x: (wx + FIELD_WIDTH  / 2) / FIELD_WIDTH  * MW,
+                y: (wz + FIELD_DEPTH / 2) / FIELD_DEPTH * MH,
+            };
+        }
+
+        function drawMap() {
+            const canvas = document.getElementById('map-canvas');
+            const ctx = canvas.getContext('2d');
+            const MW = 400, MH = 220;
+            ctx.clearRect(0, 0, MW, MH);
+
+            // Background
+            ctx.fillStyle = '#1a2a14';
+            ctx.fillRect(0, 0, MW, MH);
+
+            // Zone: West Rock Field (X -950→-200)
+            const r1 = worldToMap(-950, -500), r2 = worldToMap(-200, 500);
+            ctx.fillStyle = '#4a4540';
+            ctx.fillRect(r1.x, 0, r2.x - r1.x, MH);
+
+            // Zone: East Forest (X 150→950)
+            const f1 = worldToMap(150, -500), f2 = worldToMap(950, 500);
+            ctx.fillStyle = '#1a3a10';
+            ctx.fillRect(f1.x, 0, f2.x - f1.x, MH);
+
+            // River (sinusoidal strip, same formula as buildRiver)
+            ctx.strokeStyle = '#2a6a99';
+            ctx.lineWidth = 8;
+            ctx.beginPath();
+            for (let wz = -500; wz <= 500; wz += 10) {
+                const wx = Math.sin(wz * 0.005) * 120 - 100;
+                const p = worldToMap(wx, wz);
+                wz === -500 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+            }
+            ctx.stroke();
+
+            // Grid lines every 200 world units
+            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            ctx.lineWidth = 1;
+            for (let wx = -1000; wx <= 1000; wx += 200) {
+                const p = worldToMap(wx, 0);
+                ctx.beginPath(); ctx.moveTo(p.x, 0); ctx.lineTo(p.x, MH); ctx.stroke();
+            }
+            for (let wz = -500; wz <= 500; wz += 200) {
+                const p = worldToMap(0, wz);
+                ctx.beginPath(); ctx.moveTo(0, p.y); ctx.lineTo(MW, p.y); ctx.stroke();
+            }
+
+            // Border
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(0, 0, MW, MH);
+
+            // Atelier icon at (0, 0)
+            const home = worldToMap(0, 0);
+            ctx.font = '16px serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🏠', home.x, home.y);
+
+            // Zone labels
+            ctx.font = 'bold 9px monospace';
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.textAlign = 'center';
+            ctx.fillText('ROCK FIELD', worldToMap(-575, 0).x, 12);
+            ctx.fillText('MEADOW',     worldToMap(-75,  0).x, 12);
+            ctx.fillText('FOREST',     worldToMap(550,  0).x, 12);
+
+            // Player position & direction arrow
+            const pp = worldToMap(camera.position.x, camera.position.z);
+            const yaw = camera.rotation.y;
+            const arrowLen = 8;
+            const fx = -Math.sin(yaw) * arrowLen;
+            const fz =  Math.cos(yaw) * arrowLen; // map Y = world Z
+
+            ctx.save();
+            ctx.translate(pp.x, pp.y);
+            ctx.beginPath();
+            ctx.arc(0, 0, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffdd44';
+            ctx.fill();
+            // Direction line
+            ctx.strokeStyle = '#ffdd44';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(fx, fz);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function toggleMap() {
+            const modal = document.getElementById('map-modal');
+            if (modal.style.display === 'block') {
+                modal.style.display = 'none';
+                clearInterval(mapInterval);
+                mapInterval = null;
+            } else {
+                modal.style.display = 'block';
+                drawMap();
+                mapInterval = setInterval(drawMap, 100);
+            }
+        }
 
         // --- Compass Bar ---
         const _compassCanvas = document.getElementById('compass');
